@@ -1,0 +1,472 @@
+"""
+./src/render_molecules/arrangement/geometry.py
+
+python -m src.render_molecules.arrangement.geometry
+
+Math utilities for transforming molecules between local and world coordinate systems, and checking spatial relationships.
+"""
+
+import numpy as np
+
+from src.render_molecules.arrangement.scene_state import (
+    MoleculeInstance,
+    MoleculeTemplate,
+)
+from src.utils.constants import (
+    ANGSTROM_TO_METRES,
+    DEFAULT_RADIUS,
+    ELEMENT_MASSES,
+    ELEMENT_RADII,
+)
+from src.utils.type_annotations import Matrix3x1, Matrix3x3, Matrix3x4
+
+# ============================================================================
+# Bounding Box Helpers
+# ============================================================================
+
+
+def compute_molecule_bbox(template: MoleculeTemplate) -> tuple[Matrix3x1, Matrix3x1]:
+    """
+    Computes the min/max bounding boxes of molecule in its local space
+
+    Args:
+        local_xyz (tuple[np.ndarray, np.ndarray, np.ndarray]): Local XYZ coordinates.
+
+    Returns:
+        tuple[Matrix3x1, Matrix3x1]: Contains min_bound (min_x, min_y, min_z) and max_bound (max_x, max_y, max_z) as a BBOX
+    """
+    local_xyz = template.local_xyz
+
+    min_bound = np.array(np.min(local_xyz, axis=1))  # Axis=1 gives one minimum per XYZ
+    max_bound = np.array(np.max(local_xyz, axis=1))
+
+    return min_bound, max_bound
+
+
+def compute_bounding_sphere_radius(template: MoleculeTemplate) -> float:
+    """
+    Creates a spherical bounding box around a molecule, returning its radius, centered around CoM
+
+    Args:
+        template (MoleculeTemplate): The molecule template
+
+    Returns:
+        float: Sphere radius
+    """
+    com = calculate_center_of_mass(template=template)
+
+    local_xyz = template.local_xyz
+
+    coords = np.column_stack(
+        local_xyz
+    )  # Groups xyz[0], [1], and [2] into a single array of coords, doing it for all the rest too
+
+    distances = np.linalg.norm(coords - com, axis=1)
+
+    return float(np.max(distances))
+
+
+def compute_instance_bbox(
+    template: MoleculeTemplate, instance: MoleculeInstance
+) -> tuple[Matrix3x1, Matrix3x1]:
+    """
+    Computes the bbox for a molecule instance in world space
+
+    Args:
+        template (MoleculeTemplate): The molecule template to apply a transformation to
+        instance (MoleculeInstance): The molecule instance containing position and rotation
+
+    Returns:
+        tuple[Matrix3x1, Matrix3x1]: Tuple with lower corner and upper corner, respectively
+    """
+    world_instance = apply_instance_transform(template=template, instance=instance)
+    coords = np.column_stack(world_instance)
+
+    lowest = np.min(coords, axis=0)
+    highest = np.max(coords, axis=0)
+
+    return lowest, highest
+
+
+# ============================================================================
+# Coordinate Transformations
+# ============================================================================
+
+
+def get_rotation_matrix(yaw: float, pitch: float, roll: float) -> Matrix3x3:
+    """
+    Creates a 3x3 rotation matrix from Euler angles, in radians.
+    Args:
+        yaw (float): Twisting around vertical axis (Z)
+        pitch (float): Rotation around side-side axis (Y)
+        roll (float): Rotation around forward-backward axis (X)
+
+    Returns:
+        Matrix3x3: Rotation matrix of shape (3, 3)
+    """
+    cz, sz = np.cos(yaw), np.sin(yaw)
+    cy, sy = np.cos(pitch), np.sin(pitch)
+    cx, sx = np.cos(roll), np.sin(roll)
+
+    # ZYX rotation: R = Rz(yaw) @ Ry(pitch) @ Rx(roll)
+    Rz = np.array(
+        [
+            [cz, -sz, 0],
+            [sz, cz, 0],
+            [0, 0, 1],
+        ]
+    )
+    Ry = np.array(
+        [
+            [cy, 0, sy],
+            [0, 1, 0],
+            [-sy, 0, cy],
+        ]
+    )
+    Rx = np.array(
+        [
+            [1, 0, 0],
+            [0, cx, -sx],
+            [0, sx, cx],
+        ]
+    )
+
+    return Rz @ Ry @ Rx
+
+
+def apply_transformation(
+    template: MoleculeTemplate,
+    position: Matrix3x1,
+    rotation_matrix: Matrix3x3,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Applies rotation then translation.
+
+    Args:
+        local_xyz (tuple[np.ndarray, np.ndarray, np.ndarray]): Local XYZ coordinates of a molecule
+        position (Matrix3x1): Translation vector of shape (3,): [tx, ty, tz]
+        rotation_matrix (Matrix3x3): Rotation matrix of shape (3, 3)
+                                      [ cos(theta)  -sin(theta)   0 ]
+                                      [ sin(theta)   cos(theta)   0 ]
+                                      [    0             0        1 ]
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing transformed XYZ
+    """
+    local_xyz = template.local_xyz
+    coords = np.vstack(
+        local_xyz
+    )  # np.vstack stacks a tuple of multiple elements into arrays
+    world = rotation_matrix @ coords
+    world = world + position.reshape(3, 1)
+    return world[0], world[1], world[2]
+
+
+def apply_instance_transform(
+    template: MoleculeTemplate, instance: MoleculeInstance
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Applies rotation and translation using instance's stored position and rotation.
+
+    Args:
+        template (MoleculeTemplate): The molecule template
+        instance (MoleculeInstance): The molecule instance containing position and rotation
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing all transformed X, Y, and Z
+    """
+    return apply_transformation(
+        template=template, position=instance.position, rotation_matrix=instance.rotation
+    )
+
+
+# ============================================================================
+# Molecular Properties
+# ============================================================================
+
+
+def calculate_center_of_mass(
+    template: MoleculeTemplate,
+) -> Matrix3x1:
+    """
+    Calculates center of mass of a molecule in its local space.
+
+    Args:
+        template (MoleculeTemplate): The molecule template
+
+    Returns:
+        Matrix3x1: XYZ of the local center of mass (COM)
+    """
+    local_xyz = template.local_xyz
+    elements = template.elements
+    try:
+        element_masses_used = np.array(
+            [ELEMENT_MASSES.get(element) for element in elements]
+        )
+    except KeyError as e:
+        print(f"KeyError: Mass did not exist for element: {e}")
+
+    total_mass = sum(element_masses_used)
+
+    com_x: float = np.sum(element_masses_used * local_xyz[0]) / total_mass
+    com_y: float = np.sum(element_masses_used * local_xyz[1]) / total_mass
+    com_z: float = np.sum(element_masses_used * local_xyz[2]) / total_mass
+
+    return np.array([com_x, com_y, com_z])
+
+
+def calculate_environment_center_of_mass(
+    template: MoleculeTemplate,
+    instance: MoleculeInstance,
+) -> Matrix3x1:
+    """
+    Calculates center of mass of a molecule in environment space.
+
+    Args:
+        template (MoleculeTemplate): The molecule template
+        instance (MoleculeInstance): The molecule instance
+
+    Returns:
+        Matrix3x1: XYZ of the local center of mass (COM)
+    """
+    xyz = apply_instance_transform(template=template, instance=instance)
+    elements = template.elements
+
+    element_masses_used = np.array(
+        [ELEMENT_MASSES.get(element) for element in elements]
+    )
+
+    total_mass = sum(element_masses_used)
+
+    com_x: float = np.sum(element_masses_used * xyz[0]) / total_mass
+    com_y: float = np.sum(element_masses_used * xyz[1]) / total_mass
+    com_z: float = np.sum(element_masses_used * xyz[2]) / total_mass
+
+    return np.array([com_x, com_y, com_z])
+
+
+# ============================================================================
+# Spatial Checkers (Collision Detection)
+# ============================================================================
+
+
+def point_in_bounds(point: Matrix3x1, bbox: tuple[Matrix3x1, Matrix3x1]) -> bool:
+    """
+    Determines if a point is within a bounding box, given the point coordinates and the bbox.
+    Example:
+        point = np.array([1.2, -0.5, 3.0])
+        lower = np.array([0.0, -1.0, 2.5])
+        upper = np.array([2.0, 0.0, 4.0])
+
+        point >= lower
+        -> np.array([ True, True, True])
+
+        point <= upper
+        -> np.array([ True, True, True])
+
+        (point >= lower) & (point <= upper)
+        -> np.array([ True, True, True])
+
+        np.all((point >= lower) & (point <= upper))
+        -> True
+
+    Args:
+        point (Matrix3x1): Point coordinates.
+        bbox (tuple[Matrix3x1, Matrix3x1]): Tuple of bottom, top bbox coordinates
+
+    Returns:
+        bool: True if point is in bounds, false if not.
+    """
+    bbox_bottom, bbox_top = bbox
+    lower = np.minimum(
+        bbox_bottom, bbox_top
+    )  # Makes sure lower corner is correct even if inputs are reversed
+    upper = np.maximum(bbox_bottom, bbox_top)  # Same thing here
+
+    return bool(
+        np.all((point >= lower) & (point <= upper))
+    )  # Checks for each column in point and lower/upper
+
+
+def check_sphere_overlap(
+    sphere_1: Matrix3x1, sphere_2: Matrix3x1, r1: float, r2: float
+) -> bool:
+    """
+    Checks if two spheres overlap, taking into account their radii.
+
+    Args:
+        sphere_1 (Matrix3x1): The first sphere's XYZ coordinates.
+        sphere_2 (Matrix3x1): The second sphere's XYZ coordinates.
+        r1 (float): The first sphere's radius.
+        r2 (float): The second sphere's radius.
+
+    Returns:
+        bool: True if they overlap, false otherwise.
+    """
+    delta = sphere_1 - sphere_2
+    return bool(np.dot(delta, delta) < (r1 + r2) ** 2)
+
+
+def check_bbox_overlap(
+    bbox_1: tuple[Matrix3x1, Matrix3x1], bbox_2: tuple[Matrix3x1, Matrix3x1]
+) -> bool:
+    """
+    Checks if two AABB bboxes overlap.
+
+    Args:
+        bbox_1 (tuple[Matrix3x1, Matrix3x1]): First bbox
+        bbox_2 (tuple[Matrix3x1, Matrix3x1]): Second bbox
+
+    Returns:
+        bool: True if overlap, false otherwise
+    """
+    lowest_1, highest_1 = bbox_1
+    lowest_2, highest_2 = bbox_2
+
+    # Normalize corners in case any bbox is provided in reversed order.
+    low_1, high_1 = np.minimum(lowest_1, highest_1), np.maximum(lowest_1, highest_1)
+    low_2, high_2 = np.minimum(lowest_2, highest_2), np.maximum(lowest_2, highest_2)
+
+    # Two AABBs overlap iff their projected intervals overlap on all axes.
+    return bool(np.all((low_1 <= high_2) & (low_2 <= high_1)))
+
+
+def check_instance_overlap(
+    template_1: MoleculeTemplate,
+    template_2: MoleculeTemplate,
+    instance_1: MoleculeInstance,
+    instance_2: MoleculeInstance,
+) -> bool:
+    """
+    Checks whether two molecule instances overlap in world space.
+
+    The check is staged and short-circuits:
+    1) Bounding-sphere overlap gate
+    2) AABB overlap gate
+    3) Atom-level sphere overlap
+
+    At each gate, "pass" means no overlap and the function returns False early.
+    The function returns True only if all gates indicate overlap and at least one
+    atom pair overlaps.
+
+    Args:
+        template_1 (MoleculeTemplate): First molecule template.
+        template_2 (MoleculeTemplate): Second molecule template.
+        instance_1 (MoleculeInstance): First molecule instance.
+        instance_2 (MoleculeInstance): Second molecule instance.
+
+    Returns:
+        bool: True if the instances overlap, False otherwise.
+    """
+    transformed_coords_1 = np.column_stack(
+        apply_instance_transform(template=template_1, instance=instance_1)
+    )
+    transformed_coords_2 = np.column_stack(
+        apply_instance_transform(template=template_2, instance=instance_2)
+    )
+
+    com_1 = calculate_environment_center_of_mass(
+        template=template_1, instance=instance_1
+    )
+    com_2 = calculate_environment_center_of_mass(
+        template=template_2, instance=instance_2
+    )
+
+    sphere_radius_1 = compute_bounding_sphere_radius(template=template_1)
+    sphere_radius_2 = compute_bounding_sphere_radius(template=template_2)
+
+    bbox_1 = compute_instance_bbox(template=template_1, instance=instance_1)
+    bbox_2 = compute_instance_bbox(template=template_2, instance=instance_2)
+
+    # "Pass" means no overlap at this stage.
+    sphere_pass = not check_sphere_overlap(
+        com_1, com_2, sphere_radius_1, sphere_radius_2
+    )
+    if sphere_pass:
+        return False
+
+    bbox_pass = not check_bbox_overlap(bbox_1=bbox_1, bbox_2=bbox_2)
+    if bbox_pass:
+        return False
+
+    # Convert atomic radii from meters to Angstroms to match coordinate system
+    radii_1 = np.array(
+        [
+            ELEMENT_RADII.get(int(element), DEFAULT_RADIUS) / ANGSTROM_TO_METRES
+            for element in template_1.elements
+        ]
+    )
+    radii_2 = np.array(
+        [
+            ELEMENT_RADII.get(int(element), DEFAULT_RADIUS) / ANGSTROM_TO_METRES
+            for element in template_2.elements
+        ]
+    )
+
+    atom_overlap = False
+    for i, atom_1 in enumerate(transformed_coords_1):
+        for j, atom_2 in enumerate(transformed_coords_2):
+            if check_sphere_overlap(
+                atom_1, atom_2, float(radii_1[i]), float(radii_2[j])
+            ):
+                atom_overlap = True
+                break
+        if atom_overlap:
+            break
+
+    if not atom_overlap:
+        return False
+
+    return True
+
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+
+def distance_between_points(
+    start: Matrix3x1,
+    end: Matrix3x1,
+) -> np.floating:
+    """
+    Calculates the distance between two points in 3D space
+
+    Args:
+        start (Matrix3x1): Starting point, shape (3,)
+        end (Matrix3x1): End point, shape (3,)
+
+    Returns:
+        np.floating: Distance
+    """
+    return np.linalg.norm(end - start)
+
+
+def compute_bbox_center(box_bottom: Matrix3x4, box_top: Matrix3x4) -> Matrix3x1:
+    """
+    Takes two bbox corners and returns the bbox's center
+
+    Args:
+        box_bottom (Matrix3x4): Bottom corner
+        box_top (Matrix3x4): Top corner
+
+    Returns:
+        Matrix3x1: Center in XYZ coords
+    """
+    lower = np.minimum.reduce(box_bottom, axis=1)
+    upper = np.maximum.reduce(box_top, axis=1)
+
+    return (lower + upper) / 2
+
+
+def radians(theta: float) -> float:
+    """
+    Converts an angle from degrees to radians
+
+    Args:
+        theta (float): Angle in degrees
+
+    Returns:
+        float: Angle in radians
+    """
+    return np.pi * theta / 180

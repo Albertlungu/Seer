@@ -1,0 +1,303 @@
+name: Build Seer
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact_name: Seer-macOS.dmg
+          - os: windows-latest
+            artifact_name: Seer-Windows.zip
+          - os: ubuntu-latest
+            artifact_name: Seer-Linux.tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ── macOS ──────────────────────────────────────────────────────────────
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # Fetch a self-contained Python (no external framework dependencies)
+          PBS_URL=$(curl -s -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/indygreg/python-build-standalone/releases?per_page=10" -L | \
+            python3 -c "
+          import sys, json
+          releases = json.load(sys.stdin)
+          for release in releases:
+              for a in release.get('assets', []):
+                  n = a['name']
+                  if '3.12' in n and 'aarch64-apple-darwin' in n and 'install_only' in n and n.endswith('.tar.gz'):
+                      print(a['browser_download_url']); sys.exit(0)
+          sys.exit(1)
+          ")
+          curl -L "$PBS_URL" -o pbs.tar.gz
+          tar -xf pbs.tar.gz   # extracts to python/
+
+          python/bin/pip3 install --upgrade pip -q
+          python/bin/pip3 install -r requirements-prod.txt -q
+
+          # Assemble .app bundle
+          mkdir -p Seer.app/Contents/MacOS
+          mkdir -p Seer.app/Contents/Resources
+
+          cat > Seer.app/Contents/MacOS/Seer << 'EOF'
+          #!/bin/bash
+          RESOURCES="$(cd "$(dirname "$0")/../Resources" && pwd)"
+          exec "$RESOURCES/python-dist/bin/python3" "$RESOURCES/main.py"
+          EOF
+          chmod +x Seer.app/Contents/MacOS/Seer
+
+          cat > Seer.app/Contents/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>Seer</string>
+            <key>CFBundleExecutable</key><string>Seer</string>
+            <key>CFBundleIdentifier</key><string>com.seer.molecular</string>
+            <key>CFBundleVersion</key><string>1.0.0</string>
+            <key>CFBundleShortVersionString</key><string>1.0.0</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleIconFile</key><string>AppIcon</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>LSMinimumSystemVersion</key><string>12.0</string>
+          </dict>
+          </plist>
+          EOF
+
+          cp assets/seer-icon.icns Seer.app/Contents/Resources/AppIcon.icns
+          cp main.py Seer.app/Contents/Resources/
+          cp -r src Seer.app/Contents/Resources/
+          cp -r data Seer.app/Contents/Resources/
+          cp -r python Seer.app/Contents/Resources/python-dist
+
+          # DMG
+          brew install create-dmg
+          mkdir dmg-stage
+          cp -r Seer.app dmg-stage/Seer.app
+          create-dmg \
+            --volname "Seer" \
+            --background "assets/dmg-background.png" \
+            --window-size 1097 844 \
+            --icon-size 160 \
+            --icon "Seer.app" 274 422 \
+            --app-drop-link 823 422 \
+            "${{ matrix.artifact_name }}" \
+            dmg-stage
+
+      # ── Windows ────────────────────────────────────────────────────────────
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+          python -m pip install -r requirements-prod.txt
+
+          pyinstaller --onedir --noconfirm --name Seer --add-data "data;data" --collect-all panda3d --collect-all direct main.py
+
+          Compress-Archive -Path dist\Seer -DestinationPath "${{ matrix.artifact_name }}"
+
+      # ── Linux ──────────────────────────────────────────────────────────────
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # Fetch a self-contained Python for Linux x86_64
+          PBS_URL=$(curl -s -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/indygreg/python-build-standalone/releases?per_page=10" -L | \
+            python3 -c "
+          import sys, json
+          releases = json.load(sys.stdin)
+          for release in releases:
+              for a in release.get('assets', []):
+                  n = a['name']
+                  if '3.12' in n and 'x86_64-unknown-linux-gnu' in n and 'install_only' in n and n.endswith('.tar.gz'):
+                      print(a['browser_download_url']); sys.exit(0)
+          sys.exit(1)
+          ")
+          curl -L "$PBS_URL" -o pbs.tar.gz
+          tar -xf pbs.tar.gz   # extracts to python/
+
+          python/bin/pip3 install --upgrade pip -q
+          python/bin/pip3 install -r requirements-prod.txt -q
+
+          mkdir Seer
+          cp main.py Seer/
+          cp -r src Seer/src
+          cp -r data Seer/data
+          cp -r python Seer/python-dist
+
+          cat > Seer/Seer.sh << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          exec "$DIR/python-dist/bin/python3" "$DIR/main.py"
+          EOF
+          chmod +x Seer/Seer.sh
+
+          tar -czf "${{ matrix.artifact_name }}" Seer
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+
+  # ── Source archive (manual / from-source run) ──────────────────────────────
+  build-source:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build venv, and package archive
+        run: |
+          python -m venv venv-prod
+          venv-prod/bin/pip install --upgrade pip -q
+          venv-prod/bin/pip install -r requirements-prod.txt -q
+
+          mkdir -p Seer-Source
+          git ls-files | while IFS= read -r f; do
+            mkdir -p "Seer-Source/$(dirname "$f")"
+            cp "$f" "Seer-Source/$f"
+          done
+          cp -r venv-prod Seer-Source/venv-prod
+          cp scripts/run.sh Seer-Source/run.sh
+          cp scripts/run.ps1 Seer-Source/run.ps1
+          chmod +x Seer-Source/run.sh
+          zip -r Seer-Source.zip Seer-Source/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Seer-Source.zip
+          path: Seer-Source.zip
+
+  # ── Release ────────────────────────────────────────────────────────────────
+  release:
+    needs: [build, build-source]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: |
+            ## Demo
+
+            https://cdn.hackclub.com/019dc7c5-9869-71f2-969a-f2bd21197075/seer-demo.mp4
+
+            ## Installation
+
+            Each download below is a self-contained package. It ships with its own Python runtime and all dependencies, so no Python installation is required.
+
+            If the packaged app does not work on your machine, see **Running from source** at the bottom.
+
+            ---
+
+            ### macOS
+
+            1. Download `Seer-macOS.dmg` and open it.
+            2. Drag `Seer.app` into your Applications folder.
+            3. Try to open the app. It will most likely be blocked the first time.
+            4. If it is blocked, open Terminal and run:
+            ```
+            xattr -dr com.apple.quarantine /Applications/Seer.app
+            ```
+            5. Go to **System Settings > Privacy & Security**, scroll down, and click **Open Anyway** next to the Seer entry.
+
+            **To run from the terminal instead:**
+            ```
+            /Applications/Seer.app/Contents/MacOS/Seer
+            ```
+
+            If it still does not open, follow the **Running from source** instructions below.
+
+            ---
+
+            ### Windows
+
+            1. Download `Seer-Windows.zip` and unzip it anywhere (e.g. your Downloads folder).
+            2. Open the `Seer` folder inside.
+            3. Double-click `Seer.exe` to launch the app.
+
+            **To run from a terminal (Command Prompt or PowerShell):**
+            ```
+            cd path\to\Seer
+            .\Seer.exe
+            ```
+
+            If the app does not start, follow the **Running from source** instructions below.
+
+            ---
+
+            ### Linux
+
+            1. Download `Seer-Linux.tar.gz`.
+            2. Extract and run:
+            ```
+            tar -xzf Seer-Linux.tar.gz
+            cd Seer
+            ./Seer.sh
+            ```
+
+            If the app does not start, follow the **Running from source** instructions below.
+
+            ---
+
+            ## Running from source
+
+            Use this if the packaged app above failed. Requires **Python 3.12+** installed on your system.
+
+            1. Download `Seer-Source.zip` and unzip it anywhere.
+            2. Open a terminal (or PowerShell on Windows) and `cd` into the folder.
+            3. Run the script for your platform:
+
+            **macOS / Linux**
+            ```
+            ./run.sh
+            ```
+
+            **Windows (PowerShell)**
+            ```
+            .\run.ps1
+            ```
+
+            On the first run the script creates a virtual environment and installs all dependencies automatically. Subsequent runs start immediately.
+          files: |
+            Seer-macOS.dmg/Seer-macOS.dmg
+            Seer-Windows.zip/Seer-Windows.zip
+            Seer-Linux.tar.gz/Seer-Linux.tar.gz
+            Seer-Source.zip/Seer-Source.zip

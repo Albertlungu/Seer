@@ -1,0 +1,21 @@
+# Utility
+pillow
+colorama
+python-dotenv
+numpy
+requests
+
+# AI/ML APIs
+google-genai
+openai
+torch
+transformers
+ollama
+
+# 3D/Graphics
+open3d
+panda3d
+rdkit
+
+# SfM/Photogrammetry
+pycolmap
