@@ -20,7 +20,7 @@ class Room(ShowBase):
             "/Users/albertlungu/Local/GitHub/Seer/data/reconstructions/obj/albert_room.obj"
         )  # Loads the 3D model
         self.environ.reparentTo(self.render)  # The root of the scene (the topmost node)
-        self.environ.setP(85)  # Sets the pitch (rotation around x axis) to 90 deg
+        self.environ.setP(90)  # Sets the pitch (rotation around x axis) to 90 deg
         self.environ.setTwoSided(True)
 
         center = self.environ.getTightBounds()  # Returns a tuple of the minimum and maximum corners of the AABB (axis-aligned bounding)
@@ -31,7 +31,7 @@ class Room(ShowBase):
         self.camLens.setFov(90)
 
         self.sensitivity = (
-            0.3  # Sens in degrees of cam rotation per pixel of mouse movement
+            0.1  # Sens in degrees of cam rotation per pixel of mouse movement
         )
         self.heading = 0  # Left/Right rotation
         self.pitch = 0  # Up/Down tilt
@@ -51,6 +51,24 @@ class Room(ShowBase):
 
         self.mouse_locked = True
         self.accept("escape", self.toggle_mouse_lock)
+
+        self.move_speed = 1.5  # In units/s
+        self.keys = {
+            "w": False,
+            "s": False,
+            "a": False,
+            "d": False,
+        }  # Defining the keys used
+        self.accept("w", self.set_key, ["w", True])
+        self.accept("w-up", self.set_key, ["w", False])
+        self.accept("a", self.set_key, ["a", True])
+        self.accept("a-up", self.set_key, ["a", False])
+        self.accept("s", self.set_key, ["s", True])
+        self.accept("s-up", self.set_key, ["s", False])
+        self.accept("d", self.set_key, ["d", True])
+        self.accept("d-up", self.set_key, ["d", False])
+
+        self.taskMgr.add(self.move, "move")
 
     def toggle_mouse_lock(self):
         """
@@ -99,6 +117,36 @@ class Room(ShowBase):
                 # Makes sure the cursor is always centered at the middle of the screen
                 self.win.movePointer(0, cx, cy)
                 # After each frame, move the mouse back to center
+        return task.cont
+
+    def set_key(self, key: str, value: bool) -> None:
+        """
+        Store whether a key is currently held down.
+
+        Args:
+            key (str): Which key it is.
+            value (bool): Pressed or not.
+        """
+        self.keys[key] = value
+
+    def move(self, task):
+        """
+        Moves the camera based on the WASD inputs
+
+        Args:
+            task (Task): Task object.
+        """
+        dt = globalClock.getDt()  # Number of seconds since last frame so that movement speed is consistent across monitors
+
+        if self.keys["w"]:
+            self.camera.setY(self.camera, self.move_speed * dt)
+        if self.keys["s"]:
+            self.camera.setY(self.camera, -self.move_speed * dt)
+        if self.keys["a"]:
+            self.camera.setX(self.camera, -self.move_speed * dt)
+        if self.keys["d"]:
+            self.camera.setX(self.camera, self.move_speed * dt)
+
         return task.cont
 
 
