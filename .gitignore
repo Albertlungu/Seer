@@ -209,3 +209,10 @@ __marimo__/
 
 .DS_Store
 private
+
+# Large binary reconstruction outputs - keep off git, store separately
+data/reconstructions/
+data/env_vids/
+*.usdz
+*.mov
+*.obj
