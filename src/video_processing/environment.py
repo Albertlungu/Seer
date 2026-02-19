@@ -53,6 +53,11 @@ class Room(ShowBase):
         self.accept("escape", self.toggle_mouse_lock)
 
         self.move_speed = 1.5  # In units/s
+        self.delta_speed = 0.5  # By how much to change speed
+        self.accept(
+            "shift-=", self.control_speed, [self.delta_speed]
+        )  # e.g. "+" to increase speed
+        self.accept("-", self.control_speed, [-self.delta_speed])  # - to decrease
         self.keys = {
             "w": False,
             "s": False,
@@ -70,10 +75,10 @@ class Room(ShowBase):
 
         self.taskMgr.add(self.move, "move")
 
-        self.delta = 2  # By how many degrees to change FOV
+        self.delta_zoom = 2  # By how many degrees to change FOV
 
-        self.accept("wheel_up", self.zoom, [-self.delta])
-        self.accept("wheel_down", self.zoom, [self.delta])
+        self.accept("wheel_up", self.zoom, [-self.delta_zoom])
+        self.accept("wheel_down", self.zoom, [self.delta_zoom])
 
     def toggle_mouse_lock(self):
         """
@@ -164,6 +169,15 @@ class Room(ShowBase):
         fov = self.camLens.getFov()
         new_fov = max(0.1, min(100, fov[0] + delta))
         self.camLens.setFov(new_fov)
+
+    def control_speed(self, delta: int) -> None:
+        """
+        Speed control helper function for increasing/decreasing movement speed
+
+        Args:
+            delta (int): By how many units/s to change speed.
+        """
+        self.move_speed = max(0.1, min(10, self.move_speed + delta))
 
 
 app = Room()
