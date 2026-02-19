@@ -5,6 +5,7 @@ Loads the Qwen2.5-VL 7B model for later use.
 """
 
 import base64
+import json
 import os
 
 from dotenv import load_dotenv
@@ -46,58 +47,32 @@ class VisionInstance:
                         {
                             "type": "text",
                             "text": """
-This is an image of a virtual environment. You are to very briefly (in as little words as possible)
-label each of the objects in the photo with the following features, in JSON format. In parentheses
-are the labels to put to each category:
-- item name (name)
-- material or materials it is most likely made of, being incredibly precise with the specific type
-(e.g. instead of vague fabric, something more precise, such as cotton) (material)
+Analyze this image and identify every visible object.
 
-Do not include triple backticks in your response.
+For each object, return:
+- "name": the object name (lowercase, concise)
+- "materials": an array of the specific materials it is made of
 
-EXAMPLE:
+Rules:
+1. Be precise with materials. Use specific types, not generic ones:
+   - Instead of "fabric" -> "cotton", "polyester", "nylon", "linen"
+   - Instead of "plastic" -> "ABS", "polycarbonate", "polypropylene", "PVC"
+   - Instead of "metal" -> "aluminum", "steel", "brass", "iron"
+   - Instead of "wood" -> "oak", "pine", "MDF", "plywood", "particleboard"
+2. If an object has multiple distinct materials, list each one separately in the array.
+3. Only output raw JSON. No markdown, no backticks, no explanation.
+4. Use snake_case for object keys.
 
-json
+Required output format (and nothing else):
+
 {
-  "bed": {
-    "name": "bed",
-    "material": "synthetic leather"
+  "bed_frame": {
+    "name": "bed frame",
+    "materials": ["pine", "steel"]
   },
   "pillow": {
     "name": "pillow",
-    "material": "polyester"
-  },
-  "duvet": {
-    "name": "duvet",
-    "material": "cotton"
-  },
-  "nightstand": {
-    "name": "nightstand",
-    "material": "acrylic glass and MDF"
-  },
-  "drawer": {
-    "name": "drawer",
-    "material": "MDF with metal handles"
-  },
-  "shelf": {
-    "name": "shelf",
-    "material": "wood composite"
-  },
-  "photo_frames": {
-    "name": "photo frames",
-    "material": "wood and glass"
-  },
-  "spray_can": {
-    "name": "spray can",
-    "material": "aluminum"
-  },
-  "remote_control": {
-    "name": "remote control",
-    "material": "plastic"
-  },
-  "floor": {
-    "name": "floor",
-    "material": "laminate wood"
+    "materials": ["cotton", "polyester"]
   }
 }
 """,
@@ -109,7 +84,12 @@ json
 
         try:
             response = completion.choices[0].message.content
-            return response
+            if response is None:
+                return "Error: model returned no content."
+            parsed = json.loads(response)
+            return json.dumps(parsed, indent=2)
+        except json.JSONDecodeError:
+            return response  # type: ignore[return-value]
         except TypeError as e:
             return f"There was an error while generating a response: \n\n {e}"
 
