@@ -20,7 +20,7 @@ class Room(ShowBase):
             "/Users/albertlungu/Local/GitHub/Seer/data/reconstructions/obj/albert_room.obj"
         )  # Loads the 3D model
         self.environ.reparentTo(self.render)  # The root of the scene (the topmost node)
-        self.environ.setP(90)  # Sets the pitch (rotation around x axis) to 90 deg
+        self.environ.setP(85)  # Sets the pitch (rotation around x axis) to 90 deg
         self.environ.setTwoSided(True)
 
         center = self.environ.getTightBounds()  # Returns a tuple of the minimum and maximum corners of the AABB (axis-aligned bounding)
