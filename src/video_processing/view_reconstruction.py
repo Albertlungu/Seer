@@ -1,3 +1,9 @@
+"""
+./src/video_processing/view_reconstruction.py
+
+Convert usdz to obj and view it in open3d.
+"""
+
 import argparse
 import os
 import zipfile
@@ -13,8 +19,13 @@ parser.add_argument("--output-file", default="data/reconstructions/obj/albert_ro
 args = parser.parse_args()
 
 
-def extract_textures_from_usdz(usdz_path, output_dir):
-    """USDZ is a zip archive -- extract any texture images from it."""
+def extract_textures_from_usdz(usdz_path: str, output_dir: str) -> None:
+    """
+    Extracts textures from usdz so that the OBJ has colours.
+
+    usdz_path (str): Path to the USDZ file.
+    output_dir (str): Path to the directory containing the OBJ file
+    """
     with zipfile.ZipFile(usdz_path, "r") as z:
         for name in z.namelist():
             if name.lower().endswith((".png", ".jpg", ".jpeg")):
@@ -26,7 +37,14 @@ def extract_textures_from_usdz(usdz_path, output_dir):
                 print(f"  Extracted texture: {basename}")
 
 
-def convert_to_obj(input_file, output_file):
+def convert_to_obj(input_file: str, output_file: str) -> None:
+    """
+    Converts the USDZ to OBJ
+
+    Args:
+        input_file (str): Filepath to the USDZ file
+        output_file (str): Filepath to the OBJ file
+    """
     if ".obj" in input_file:
         print("Was already an OBJ")
     elif ".usdz" in input_file:
