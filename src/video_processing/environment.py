@@ -70,6 +70,11 @@ class Room(ShowBase):
 
         self.taskMgr.add(self.move, "move")
 
+        self.delta = 2  # By how many degrees to change FOV
+
+        self.accept("wheel_up", self.zoom, [-self.delta])
+        self.accept("wheel_down", self.zoom, [self.delta])
+
     def toggle_mouse_lock(self):
         """
         Toggle mouse lock on/off with Escape.
@@ -148,6 +153,17 @@ class Room(ShowBase):
             self.camera.setX(self.camera, self.move_speed * dt)
 
         return task.cont
+
+    def zoom(self, delta: int) -> None:
+        """
+        Zoom helper function used for increasing/decreasing FOV
+
+        Args:
+            delta (int): Degrees by which to reduce FOV with each scroll tick.
+        """
+        fov = self.camLens.getFov()
+        new_fov = max(0.1, min(100, fov[0] + delta))
+        self.camLens.setFov(new_fov)
 
 
 app = Room()
