@@ -20,7 +20,7 @@ Then, you spin the scroll wheel.
 
 So first, I will use Apple's native Photogrammetry model to turn the MP4 into a 3D model. Then, using Panda3D, I will create an environment around the user.
 
-Once this is done and the user can move around in their own environment, some AI model would come in and analyze the room, determining what material each object is (not fully accurate).
+Once this is done and the user can move around in their own environment, some AI model would come in and analyze the room, determining what material each object is (not fully accurate) and create a bounding box with the label describing the material.
 
 I would then model each molecule myself to the highest degree of accuracy so that when the user zooms in to the molecular level, they can see **everything**. This means all the different bonds, bond angles, VSEPR types, and more.
 

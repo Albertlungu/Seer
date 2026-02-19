@@ -1,3 +1,5 @@
 open3d
 ursina
 panda3d
+openai
+python-dotenv
