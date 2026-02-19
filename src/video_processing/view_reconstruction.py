@@ -23,8 +23,9 @@ def extract_textures_from_usdz(usdz_path: str, output_dir: str) -> None:
     """
     Extracts textures from usdz so that the OBJ has colours.
 
-    usdz_path (str): Path to the USDZ file.
-    output_dir (str): Path to the directory containing the OBJ file
+    Args:
+        usdz_path (str): Path to the USDZ file.
+        output_dir (str): Path to the directory containing the OBJ file
     """
     with zipfile.ZipFile(usdz_path, "r") as z:
         for name in z.namelist():
