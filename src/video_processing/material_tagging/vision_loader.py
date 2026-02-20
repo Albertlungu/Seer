@@ -24,11 +24,26 @@ class VisionInstance:
 
     @staticmethod
     def image_to_data_url(path: str) -> str:
+        """
+        Turns an image to a data URL (needed for OpenRouter image interpretation)
+
+        Args:
+            path (str): Relative path to image
+
+        Returns:
+            str: The data URL
+        """
         with open(path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         return f"data:image/jpeg;base64,{b64}"
 
-    def make_completion(self):
+    def make_completion(self) -> str:
+        """
+        Makes a single response from OpenRouter.
+
+        Returns:
+            str: The JSON dump of the model's response or error if one is generated.
+        """
         url = self.image_to_data_url(self.image_path)
 
         completion = self.client.chat.completions.create(
