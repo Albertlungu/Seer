@@ -118,7 +118,7 @@ have changed:
         prev_resp = None
 
         for i in range(1, file_count, n):
-            image_path = folder_path / f"{i:04}.jpg"
+            image_path = folder_path / f"frame_{i:04}.jpg"
             image_path_str = str(image_path)
 
             print("Running Gemma on", image_path_str)
