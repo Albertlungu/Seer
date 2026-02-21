@@ -215,3 +215,4 @@ data/*/
 *.usdz
 *.mov
 *.obj
+.vscode
