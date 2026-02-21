@@ -3,3 +3,5 @@ ursina
 panda3d
 openai
 python-dotenv
+pycolmap
+google-genai
