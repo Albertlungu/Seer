@@ -23,13 +23,14 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 
 class Gemma:
-    def __init__(self, image_path: str, output_file: str) -> None:
+    def __init__(self, image_path: str, output_file: str, debug: bool) -> None:
         self.client = genai.Client(api_key=GEMINI_API_KEY)
         self.model = "gemma-3-27b-it"
         self.image_path = image_path
         self.output_file = output_file
+        self.debug = debug
 
-    def get_response(self, image_path) -> dict:
+    def get_response(self, image_path: str, prev_resp: str = "") -> dict:
         """
         Makes a single response from OpenRouter.
 
@@ -39,7 +40,7 @@ class Gemma:
         Returns:
             dict: The JSON dump of the model's response or error if one is generated.
         """
-        prompt = """
+        base_prompt = """
 Analyze this image and identify every visible object.
 
 For each object, return:
@@ -74,7 +75,19 @@ Required output format (and nothing else):
     "bounding_box": [[0.2, 0.25], [0.45, 0.25], [0.45, 0.45], [0.2, 0.45]]
   }
 }
+
 """
+        prev_resp = (
+            """
+The following is the output from the last frame that you predicted. You must attempt to be as
+consistent as possible, but keep in mind that new items may have appeared and bounding boxes will
+have changed:
+
+"""
+            + prev_resp
+        )
+        if prev_resp:
+            prompt = base_prompt + prev_resp
         img = PIL.Image.open(image_path)
         response = self.client.models.generate_content(
             model=self.model, contents=[prompt, img]
@@ -98,19 +111,30 @@ Required output format (and nothing else):
             str: The final json output
         """
 
-        folder_path = Path(self.image_path[: self.image_path.rfind("/")])
+        folder_path = Path(self.image_path).parent
         file_count = sum(1 for item in folder_path.iterdir() if item.is_file())
 
         results = {}
-        image_path = list(self.image_path)
+        prev_resp = None
 
-        i = 0
-        while i < file_count:
-            image_path[-8:] = f"{i + 1:04}.jpg"
-            image_path_str = "".join(image_path)
-            temp = self.get_response(image_path=image_path_str)
-            results[i + 1] = temp  # Keyed by frame number
-            i += n
+        for i in range(1, file_count, n):
+            image_path = folder_path / f"{i:04}.jpg"
+            image_path_str = str(image_path)
+
+            print("Running Gemma on", image_path_str)
+
+            if prev_resp is None:
+                resp = self.get_response(image_path=image_path_str)
+            else:
+                resp = self.get_response(
+                    image_path=image_path_str, prev_resp=str(prev_resp)
+                )
+
+            results[i] = resp
+            prev_resp = resp  # Setting it simply to the response from this one
+
+            if self.debug:
+                print("DEBUG:", resp)
 
         return results
 
@@ -126,7 +150,9 @@ Required output format (and nothing else):
 
 
 gemma = Gemma(
-    "data/env_imgs/albert_room/frame_0001.jpg", "data/vision_json/albert_room.json"
+    "data/env_imgs/albert_room/frame_0001.jpg",
+    "data/vision_json/albert_room.json",
+    False,
 )
 result = gemma.run_nth_frame(10)
 gemma.save_to_json(result)
