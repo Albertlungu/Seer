@@ -4,13 +4,20 @@
 Loads the Gemma 3 model from google-genai
 """
 
+import os
+
 import PIL.Image
+from dotenv import load_dotenv
 from google import genai
+
+load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 
 class Gemma:
     def __init__(self, image_path: str) -> None:
-        self.client = genai.Client()
+        self.client = genai.Client(api_key=GEMINI_API_KEY)
         self.model = "gemma-3-27b-it"
         self.image_path = image_path
 
@@ -58,3 +65,7 @@ Required output format (and nothing else):
             model=self.model, contents=[prompt, img]
         )
         return response.text
+
+
+gemma = Gemma("data/env_imgs/albert_room/frame_0001.jpg")
+print(gemma.get_response())
