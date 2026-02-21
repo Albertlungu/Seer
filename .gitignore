@@ -211,9 +211,7 @@ __marimo__/
 private
 
 # Large binary reconstruction outputs - keep off git, store separately
-data/reconstructions/
-data/env_vids/
-data/env_imgs/colmap_albert_room
+data/*
 *.usdz
 *.mov
 *.obj
