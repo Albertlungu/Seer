@@ -211,7 +211,7 @@ __marimo__/
 private
 
 # Large binary reconstruction outputs - keep off git, store separately
-data/*
+data/*/
 *.usdz
 *.mov
 *.obj
