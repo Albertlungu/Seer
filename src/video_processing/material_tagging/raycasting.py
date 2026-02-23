@@ -193,7 +193,7 @@ class Raycast:
     def raycast(self) -> dict[str, dict[str, list[np.ndarray]]] | None:
         """
         Main raycasting logic.
-        all_hit_points =
+        hit_points =
         {
             frame_name: {
                 object_name:
@@ -207,14 +207,14 @@ class Raycast:
         }
 
         Returns:
-            dict[str, dict[str, list[np.ndarray]]] | None: list of 3D hit points on mesh or None if all rays.
+            dict[str, dict[str, list[np.ndarray]]]: Dictionary containing all rays for each object.
         """
         rays = self.unprojection()
         scene = self.setup_scene()
-        all_hit_points = {}
+        hit_points = {}
 
         for frame_name, objects in rays.items():
-            all_hit_points[frame_name] = {}
+            hit_points[frame_name] = {}
             for (
                 obj_name,
                 rays_list,
@@ -239,12 +239,19 @@ class Raycast:
                         hit_points_list.append(
                             np.array(origin) + t_hit * np.array(direction)
                         )
-                all_hit_points[frame_name][obj_name] = hit_points_list
-        return all_hit_points
+                hit_points[frame_name][obj_name] = hit_points_list
+        return hit_points
 
     def aggregation(self):
         object_points = {}
-        poses = self.camera_pose()
+        hit_points = self.raycast()
+        if hit_points:  # To make sure hit points is not empty
+            for hp_frame_name, objects in hit_points.items():
+                for hp_obj_name, hit_points_list in objects.items():
+                    object_points[hp_frame_name][hp_obj_name].extend(
+                        [pt for pt in hit_points_list if pt is not None]
+                    )
+        return object_points
 
 
 def main():
