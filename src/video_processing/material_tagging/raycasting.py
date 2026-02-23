@@ -4,32 +4,42 @@
 The full raycasting pipeline, including the camera pose calculator.
 """
 
-from pathlib import Path
+import json
+from typing import TypedDict
 
 import numpy as np
 import open3d as o3d
 import pycolmap
+from PIL import Image
 
-database_path = Path("./data/env_imgs/colmap_albert_room/database.db")
-image_path = Path("./data/env_imgs/albert_room")
-output_path = Path("./data/env_imgs/colmap_albert_room/output")
+DATABSE_PATH = "./data/env_imgs/colmap_albert_room/database.db"
+IMAGES_PATH = "./data/env_imgs/albert_room"
+OUTPUT_PATH = "./data/env_imgs/colmap_albert_room/output"
+JSON_PATH = "./data/vision_json/albert_room.json"
+OBJ_PATH = "./data/reconstructions/obj/albert_room.obj"
+
+
+class ObjectData(TypedDict):
+    name: str
+    materials: list[str]
+    bounding_box: list[list[float]]
+
+
+Detections = dict[str, dict[str, ObjectData]]
 
 
 class Raycast:
     def __init__(
         self,
         database_path: str,
-        image_path: str,
+        images_path: str,
+        json_path: str,
         output_path: str,
-        bbox: list[tuple],
-        K: np.ndarray,
-        R: np.ndarray,
-        t: np.ndarray,
-        image_w: int,
-        image_h: int,
+        # bbox: list[tuple],
+        # K: np.ndarray,
+        # R: np.ndarray,
+        # t: np.ndarray,
         obj_path: str,
-        origin: np.ndarray,
-        direction: np.ndarray,
     ):
         """
         Initializing the Raycasting class.
@@ -38,27 +48,21 @@ class Raycast:
             database_path (str): Path to COLMAP database file
             image_path (str): Path to input image
             output_path (str): Path to output folder
-            bbox (list[tuple]): List of 4 (nx, ny) tuples. The normalized [0, 1] coordinates.
-            K (np.ndarray): Intrinsic matrix (3x3 array)
-            R (np.ndarray): Rotation matrix (3x3 array)
-            t (np.ndarray): Translation vector (3x1 array)
-            image_w (int): Width of the image in pixels
-            image_h (int): Height of the image in pixels
+            json_path (str): Path to the JSON file containing bounding boxes
             obj_path (str): Path to the OBJ mesh file.
-            origin: (np.ndarray): 3D coordinates of the ray origin
-            direction (np.ndarray): 3D vector for the ray direction
         """
-        self.bbox = bbox
-        self.K = K
-        self.R = R
-        self.t = t
-        self.image_w = image_w
-        self.image_h = image_h
-        self.db_path = database_path
-        self.img_path = image_path
+        self.img_path = images_path
         self.output_path = output_path
+        self.json_path = json_path
         self.obj_path = obj_path
-        self.origin = origin
+        with open(self.json_path, "rb") as f:
+            self.all_frame_detections: Detections = json.load(f)
+        # self.K = K
+        # self.R = R
+        # self.t = t
+        img = Image.open(self.img_path + "/frame_0001.jpg")
+        self.image_w, self.image_h = img.size
+        self.db_path = database_path
 
     def camera_pose(self) -> dict:
         """
@@ -75,9 +79,16 @@ class Raycast:
 
         recon = maps[0]
 
-        poses = {}  # { image_name: (K, R, t) }
+        poses: dict[
+            str, tuple[np.ndarray, np.ndarray, np.ndarray] | None
+        ] = {}  # { image_name: (K, R, t) }
 
-        for img_id, img in recon.images.items():
+        for (
+            img_id,
+            img,
+        ) in (
+            recon.images.items()
+        ):  # recon.images: dict, img_id: str (the image name), img: Image
             cam = recon.cameras[img.camera_id]
 
             fx = cam.focal_length_x
@@ -85,8 +96,8 @@ class Raycast:
             cx = cam.principal_point_x
             cy = cam.principal_point_y
             K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
-            R = img.cam_from_world.rotation.matrix()
-            t = img.cam_from_world.translation
+            R: np.ndarray = img.cam_from_world.rotation.matrix()
+            t: np.ndarray = img.cam_from_world.translation
 
             poses[img.name] = (K, R, t)
 
@@ -100,23 +111,33 @@ class Raycast:
             list: List of (origin, direction) tuples for each corner of the bounding box
         """
         rays = []
-        for nx, ny in self.bbox:
-            u = (
-                nx * self.image_w
-            )  # The actual pixel in the image corresponding to the Bbox corner
-            v = ny * self.image_h
-            pixel_h = np.array([u, v, 1.0])
+        bbox_temp = []
+        for object in self.all_frame_detections.values():
+            poses = self.camera_pose()
+            for pose in poses.values():
+                K: np.ndarray = pose[0]
+                R: np.ndarray = pose[1]
+                t: np.ndarray = pose[2]
+            bbox = object["bounding_box"]
+            for coord in bbox:
+                for nx, ny in coord:
+                    u = (
+                        nx * self.image_w
+                    )  # The actual pixel in the image corresponding to the Bbox corner
+                    v = ny * self.image_h
+                    pixel_h = np.array([u, v, 1.0])
 
-            ray_cam = np.linalg.inv(K) @ pixel_h
-            ray_cam /= np.linalg.norm(ray_cam)
+                    ray_cam = np.linalg.inv(K) @ pixel_h
+                    ray_cam /= np.linalg.norm(ray_cam)
 
-            ray_world = self.R.T @ ray_cam
-            ray_world /= np.linalg.norm(ray_world)
+                    ray_world = R.T @ ray_cam
+                    ray_world /= np.linalg.norm(ray_world)
 
-            origin = -self.R.T @ self.t
+                    origin = -R.T @ t
 
-            rays.append((origin, ray_world))
-
+                    temp = (origin, ray_world)
+                bbox_temp.append(temp)
+            rays.append(bbox_temp)
         return rays
 
     def setup_scene(self) -> o3d.t.geometry.RaycastingScene:
@@ -145,10 +166,25 @@ class Raycast:
 
         for origin, direction in rays:
             ray = o3d.core.Tensor([[*origin, *direction]], dtype=o3d.core.float32)
-            result = scene.cast_rays(ray)
+            result = scene.cast_rays(ray)  # Uses builtin raycasting funtion
             t_hit = result["t_hit"].numpy()[0]
             if np.isinf(t_hit):
-                hit_points.append(None)
+                hit_points.append(
+                    None
+                )  # For every ray that misses, None will be appended
             else:
                 hit_points.append(np.array(origin) + t_hit * np.array(direction))
         return hit_points
+
+    def aggregation(self):
+        poses = self.camera_pose()
+
+
+raycaster = Raycast(
+    database_path=DATABSE_PATH,
+    images_path=IMAGES_PATH,
+    output_path=OUTPUT_PATH,
+    json_path=JSON_PATH,
+    obj_path=OBJ_PATH,
+)
+print(raycaster.all_frame_detections)
