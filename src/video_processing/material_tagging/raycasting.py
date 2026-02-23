@@ -173,6 +173,8 @@ class Raycast:
 
                     rays_list.append((origin, ray_world))
                 rays[frame_name][obj_name] = rays_list
+                if self.debug:
+                    print(f"DEBUG: {frame_name}")
         return rays
 
     def setup_scene(self) -> o3d.t.geometry.RaycastingScene:
@@ -188,34 +190,57 @@ class Raycast:
         scene.add_triangles(mesh_t)
         return scene
 
-    def raycast(self) -> list | None:
+    def raycast(self) -> dict[str, dict[str, list[np.ndarray]]] | None:
         """
         Main raycasting logic.
+        all_hit_points =
+        {
+            frame_name: {
+                object_name:
+                    [
+                        corner1 rays,
+                        corner2 rays,
+                        corner3 rays,
+                        corner4 rays,
+                    ]
+            }
+        }
 
         Returns:
-            list | None: list of 3D hit points on mesh or None if all rays.
+            dict[str, dict[str, list[np.ndarray]]] | None: list of 3D hit points on mesh or None if all rays.
         """
         rays = self.unprojection()
         scene = self.setup_scene()
-        hit_points = {}
+        all_hit_points = {}
 
         for frame_name, objects in rays.items():
-            for corner in objects:
-                for origin, direction in corner:
+            all_hit_points[frame_name] = {}
+            for (
+                obj_name,
+                rays_list,
+            ) in (
+                objects.items()
+            ):  # Remember, objects is of this format: {object_name: [(), (), (), ()]}
+                hit_points_list = []
+                for (
+                    origin,
+                    direction,
+                ) in rays_list:  # Each (origin, direction) tuple is one corner
                     ray = o3d.core.Tensor(
                         [[*origin, *direction]], dtype=o3d.core.float32
                     )
                     result = scene.cast_rays(ray)  # Uses builtin raycasting funtion
                     t_hit = result["t_hit"].numpy()[0]
                     if np.isinf(t_hit):
-                        hit_points.append(
+                        hit_points_list.append(
                             None
                         )  # For every ray that misses, None will be appended
                     else:
-                        hit_points.append(
+                        hit_points_list.append(
                             np.array(origin) + t_hit * np.array(direction)
                         )
-        return hit_points
+                all_hit_points[frame_name][obj_name] = hit_points_list
+        return all_hit_points
 
     def aggregation(self):
         object_points = {}
@@ -231,7 +256,7 @@ def main():
         obj_path=OBJ_PATH,
         debug=True,
     )
-    raycaster.camera_pose()
+    raycaster.raycast()
 
 
 if __name__ == "__main__":
