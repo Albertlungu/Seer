@@ -130,7 +130,7 @@ have changed:
                     image_path=image_path_str, prev_resp=str(prev_resp)
                 )
 
-            results[i] = resp
+            results[image_path_str] = resp
             prev_resp = resp  # Setting it simply to the response from this one
 
             if self.debug:
