@@ -5,18 +5,30 @@ The full raycasting pipeline, including the camera pose calculator.
 """
 
 import json
+import os
+import sys
 from typing import TypedDict
 
 import numpy as np
 import open3d as o3d
 import pycolmap
+from colorama import Fore, init
 from PIL import Image
+
+log_path = "logs/video_processing/material_tagging/raycasting.log"
+
+os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+sys.stdout = open(log_path, "w")
+sys.stderr = open(log_path, "a")
 
 DATABSE_PATH = "./data/env_imgs/colmap_albert_room/database.db"
 IMAGES_PATH = "./data/env_imgs/albert_room"
 OUTPUT_PATH = "./data/env_imgs/colmap_albert_room/output"
 JSON_PATH = "./data/vision_json/albert_room.json"
 OBJ_PATH = "./data/reconstructions/obj/albert_room.obj"
+
+init(autoreset=True)
 
 
 class ObjectData(TypedDict):
@@ -40,6 +52,7 @@ class Raycast:
         # R: np.ndarray,
         # t: np.ndarray,
         obj_path: str,
+        debug: bool = False,
     ):
         """
         Initializing the Raycasting class.
@@ -50,6 +63,7 @@ class Raycast:
             output_path (str): Path to output folder
             json_path (str): Path to the JSON file containing bounding boxes
             obj_path (str): Path to the OBJ mesh file.
+            debug (bool): Whether to print debug messages or not. Defaults to False.
         """
         self.img_path = images_path
         self.output_path = output_path
@@ -63,6 +77,7 @@ class Raycast:
         img = Image.open(self.img_path + "/frame_0001.jpg")
         self.image_w, self.image_h = img.size
         self.db_path = database_path
+        self.debug = debug
 
     def camera_pose(self) -> dict:
         """
@@ -71,17 +86,26 @@ class Raycast:
         Returns:
             dict: Dictionary with camera poses.
         """
+        if self.debug:
+            print(f"{Fore.RED}DEBUG: Creating COLMAP map.")
+
         maps = pycolmap.incremental_mapping(
             database_path=self.db_path,
             image_path=self.img_path,
             output_path=self.output_path,
         )
 
+        if self.debug:
+            print("DEBUG: Map has been created.")
+
         recon = maps[0]
 
         poses: dict[
             str, tuple[np.ndarray, np.ndarray, np.ndarray] | None
         ] = {}  # { image_name: (K, R, t) }
+
+        if self.debug:
+            print(recon.images)
 
         for (
             img_id,
@@ -90,35 +114,45 @@ class Raycast:
             recon.images.items()
         ):  # recon.images: dict, img_id: str (the image name), img: Image
             cam = recon.cameras[img.camera_id]
+            if self.debug:
+                print(f"{Fore.RED}DEBUG: Image name is: {img.name}")
+                # print(f"{Fore.RED}DEBUG: {dir(cam)}")
+                # print(f"{Fore.RED}DEBUG: {dir(img.cam_from_world)}")
 
             fx = cam.focal_length_x
             fy = cam.focal_length_y
             cx = cam.principal_point_x
             cy = cam.principal_point_y
             K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
-            R: np.ndarray = img.cam_from_world.rotation.matrix()
-            t: np.ndarray = img.cam_from_world.translation
+            R: np.ndarray = img.cam_from_world().rotation.matrix()
+            t: np.ndarray = img.cam_from_world().translation
 
             poses[img.name] = (K, R, t)
 
         return poses
 
-    def unprojection(self) -> dict[str, dict[str, list[tuple]]]:
+    def unprojection(self) -> dict[str, dict[str, list[tuple[np.ndarray, np.ndarray]]]]:
         """
         Unprojects normalized bounding boxes to the 3D environment as rays
 
         Returns:
             dict[str, dict[str, list[tuple]]]: Dictionary that represents the rays for each corner of the
                                           bounding box for each object in each frame.
+                                          frame_name: {
+                                            object_name: [
+                                                (origin, ray_world),
+                                                (origin, ray_world),
+                                                (origin, ray_world),
+                                                (origin, ray_world),
+                                            ]
+                                          }
         """
         rays = {}
-        bbox_temp: dict[str, list[tuple]] = {}
+        # object_corner_rays: dict[str, list[tuple]] = {}
+        poses = self.camera_pose()
         for frame_name, objects in self.all_frame_detections.items():
-            poses = self.camera_pose()
-            for pose in poses.values():
-                K: np.ndarray = pose[0]
-                R: np.ndarray = pose[1]
-                t: np.ndarray = pose[2]
+            rays[frame_name] = {}
+            K, R, t = poses[frame_name]
             for obj_name, obj_data in objects.items():
                 bbox = obj_data["bounding_box"]
                 rays_list = []
@@ -138,8 +172,7 @@ class Raycast:
                     origin = -R.T @ t
 
                     rays_list.append((origin, ray_world))
-                bbox_temp[obj_name] = rays_list
-            rays[frame_name] = bbox_temp
+                rays[frame_name][obj_name] = rays_list
         return rays
 
     def setup_scene(self) -> o3d.t.geometry.RaycastingScene:
@@ -166,17 +199,22 @@ class Raycast:
         scene = self.setup_scene()
         hit_points = {}
 
-        for frame_name, object in rays.items():
-            for origin, direction in object.values():
-                ray = o3d.core.Tensor([[*origin, *direction]], dtype=o3d.core.float32)
-                result = scene.cast_rays(ray)  # Uses builtin raycasting funtion
-                t_hit = result["t_hit"].numpy()[0]
-                if np.isinf(t_hit):
-                    hit_points.append(
-                        None
-                    )  # For every ray that misses, None will be appended
-                else:
-                    hit_points.append(np.array(origin) + t_hit * np.array(direction))
+        for frame_name, objects in rays.items():
+            for corner in objects:
+                for origin, direction in corner:
+                    ray = o3d.core.Tensor(
+                        [[*origin, *direction]], dtype=o3d.core.float32
+                    )
+                    result = scene.cast_rays(ray)  # Uses builtin raycasting funtion
+                    t_hit = result["t_hit"].numpy()[0]
+                    if np.isinf(t_hit):
+                        hit_points.append(
+                            None
+                        )  # For every ray that misses, None will be appended
+                    else:
+                        hit_points.append(
+                            np.array(origin) + t_hit * np.array(direction)
+                        )
         return hit_points
 
     def aggregation(self):
@@ -184,11 +222,22 @@ class Raycast:
         poses = self.camera_pose()
 
 
-raycaster = Raycast(
-    database_path=DATABSE_PATH,
-    images_path=IMAGES_PATH,
-    output_path=OUTPUT_PATH,
-    json_path=JSON_PATH,
-    obj_path=OBJ_PATH,
-)
-print(raycaster.all_frame_detections)
+def main():
+    raycaster = Raycast(
+        database_path=DATABSE_PATH,
+        images_path=IMAGES_PATH,
+        output_path=OUTPUT_PATH,
+        json_path=JSON_PATH,
+        obj_path=OBJ_PATH,
+        debug=True,
+    )
+    raycaster.camera_pose()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    finally:
+        sys.stdout.close()
+        sys.stderr.close()
+    print(f"{Fore.RED}All debug messages saved to {log_path}")
