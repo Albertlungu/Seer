@@ -103,24 +103,26 @@ class Raycast:
 
         return poses
 
-    def unprojection(self) -> list:
+    def unprojection(self) -> dict[str, dict[str, list[tuple]]]:
         """
         Unprojects normalized bounding boxes to the 3D environment as rays
 
         Returns:
-            list: List of (origin, direction) tuples for each corner of the bounding box
+            dict[str, dict[str, list[tuple]]]: Dictionary that represents the rays for each corner of the
+                                          bounding box for each object in each frame.
         """
-        rays = []
-        bbox_temp = []
-        for object in self.all_frame_detections.values():
+        rays = {}
+        bbox_temp: dict[str, list[tuple]] = {}
+        for frame_name, objects in self.all_frame_detections.items():
             poses = self.camera_pose()
             for pose in poses.values():
                 K: np.ndarray = pose[0]
                 R: np.ndarray = pose[1]
                 t: np.ndarray = pose[2]
-            bbox = object["bounding_box"]
-            for coord in bbox:
-                for nx, ny in coord:
+            for obj_name, obj_data in objects.items():
+                bbox = obj_data["bounding_box"]
+                rays_list = []
+                for nx, ny in bbox:
                     u = (
                         nx * self.image_w
                     )  # The actual pixel in the image corresponding to the Bbox corner
@@ -135,9 +137,9 @@ class Raycast:
 
                     origin = -R.T @ t
 
-                    temp = (origin, ray_world)
-                bbox_temp.append(temp)
-            rays.append(bbox_temp)
+                    rays_list.append((origin, ray_world))
+                bbox_temp[obj_name] = rays_list
+            rays[frame_name] = bbox_temp
         return rays
 
     def setup_scene(self) -> o3d.t.geometry.RaycastingScene:
@@ -162,21 +164,23 @@ class Raycast:
         """
         rays = self.unprojection()
         scene = self.setup_scene()
-        hit_points = []
+        hit_points = {}
 
-        for origin, direction in rays:
-            ray = o3d.core.Tensor([[*origin, *direction]], dtype=o3d.core.float32)
-            result = scene.cast_rays(ray)  # Uses builtin raycasting funtion
-            t_hit = result["t_hit"].numpy()[0]
-            if np.isinf(t_hit):
-                hit_points.append(
-                    None
-                )  # For every ray that misses, None will be appended
-            else:
-                hit_points.append(np.array(origin) + t_hit * np.array(direction))
+        for frame_name, object in rays.items():
+            for origin, direction in object.values():
+                ray = o3d.core.Tensor([[*origin, *direction]], dtype=o3d.core.float32)
+                result = scene.cast_rays(ray)  # Uses builtin raycasting funtion
+                t_hit = result["t_hit"].numpy()[0]
+                if np.isinf(t_hit):
+                    hit_points.append(
+                        None
+                    )  # For every ray that misses, None will be appended
+                else:
+                    hit_points.append(np.array(origin) + t_hit * np.array(direction))
         return hit_points
 
     def aggregation(self):
+        object_points = {}
         poses = self.camera_pose()
 
 
