@@ -7,6 +7,7 @@ The full raycasting pipeline, including the camera pose calculator.
 import json
 import os
 import sys
+from pathlib import Path
 from typing import TypedDict
 
 import numpy as np
@@ -27,6 +28,7 @@ IMAGES_PATH = "./data/env_imgs/albert_room"
 OUTPUT_PATH = "./data/env_imgs/colmap_albert_room/output"
 JSON_PATH = "./data/vision_json/albert_room.json"
 OBJ_PATH = "./data/reconstructions/obj/albert_room.obj"
+AGGREGATIONS_PATH = "./data/env_imgs/colmap_albert_room/aggregations/aggregations.json"
 
 init(autoreset=True)
 
@@ -99,36 +101,41 @@ class Raycast:
             print("DEBUG: Map has been created.")
 
         # recon = maps[0]
-        recon = pycolmap.Reconstruction(os.path.join(self.output_path, "0"))
 
         poses: dict[
             str, tuple[np.ndarray, np.ndarray, np.ndarray] | None
         ] = {}  # { image_name: (K, R, t) }
 
-        if self.debug:
-            print(recon.images)
+        for i in range(
+            len([entry for entry in Path(self.output_path).iterdir() if entry.is_dir()])
+        ):
+            recon = pycolmap.Reconstruction(os.path.join(self.output_path, str(i)))
 
-        for (
-            img_id,
-            img,
-        ) in (
-            recon.images.items()
-        ):  # recon.images: dict, img_id: str (the image name), img: Image
-            cam = recon.cameras[img.camera_id]
             if self.debug:
-                print(f"{Fore.RED}DEBUG: Image name is: {img.name}")
-                # print(f"{Fore.RED}DEBUG: {dir(cam)}")
-                # print(f"{Fore.RED}DEBUG: {dir(img.cam_from_world)}")
+                print(recon.images)
 
-            fx = cam.focal_length_x
-            fy = cam.focal_length_y
-            cx = cam.principal_point_x
-            cy = cam.principal_point_y
-            K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
-            R: np.ndarray = img.cam_from_world().rotation.matrix()
-            t: np.ndarray = img.cam_from_world().translation
+            for (
+                img_id,
+                img,
+            ) in (
+                recon.images.items()
+            ):  # recon.images: dict, img_id: str (the image name), img: Image
+                cam = recon.cameras[img.camera_id]
+                if self.debug:
+                    print(f"{Fore.RED}DEBUG: Image name is: {img.name}")
+                    # print(f"{Fore.RED}DEBUG: {dir(cam)}")
+                    # print(f"{Fore.RED}DEBUG: {dir(img.cam_from_world)}")
 
-            poses[img.name] = (K, R, t)
+                fx = cam.focal_length_x
+                fy = cam.focal_length_y
+                cx = cam.principal_point_x
+                cy = cam.principal_point_y
+                K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
+                R: np.ndarray = img.cam_from_world().rotation.matrix()
+                t: np.ndarray = img.cam_from_world().translation
+
+                if img.name not in poses:  # To avoid duplicates
+                    poses[img.name] = (K, R, t)
 
         return poses
 
@@ -247,23 +254,27 @@ class Raycast:
                 hit_points[frame_name][obj_name] = hit_points_list
         return hit_points
 
-    def aggregate(self) -> dict[str, dict[str, list]]:
+    def aggregate(self) -> dict[str, list]:
         """
         Aggregates 3D hit points for each object across all frames.
 
         Returns:
-            dict[str, dict[str, list]]: The dictionary containing
+            dict[str, list]: The dictionary containing all hit points, top level being each object
         """
-        object_points = {}
+        object_points: dict[str, list] = {}
         hit_points = self.raycast()
-        if hit_points:  # To make sure hit points is not empty
-            for hp_frame_name, objects in hit_points.items():
+        if hit_points:
+            for _, objects in hit_points.items():
                 for hp_obj_name, hit_points_list in objects.items():
-                    object_points[hp_frame_name] = {}
-                    object_points[hp_frame_name][hp_obj_name] = []
-                    object_points[hp_frame_name][hp_obj_name].extend(
-                        [point for point in hit_points_list if point is not None]
-                    )
+                    if hp_obj_name not in object_points:
+                        object_points[hp_obj_name] = []
+                    object_points[hp_obj_name].extend(
+                        [
+                            point.tolist()
+                            for point in hit_points_list
+                            if point is not None
+                        ]
+                    )  # Convert to list since JSON cannot serialize numpy arrays
         return object_points
 
 
@@ -277,7 +288,10 @@ def main():
         debug=True,
     )
     # raycaster.raycast()
-    raycaster.aggregate()
+    aggregations = raycaster.aggregate()
+    # print(aggregations)
+    with open(AGGREGATIONS_PATH, "w") as f:
+        json.dump(aggregations, f, indent=2)
 
 
 if __name__ == "__main__":

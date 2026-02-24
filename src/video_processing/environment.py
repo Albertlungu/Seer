@@ -6,15 +6,20 @@ Creates the 3D environment in which the user can move around.
 
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import WindowProperties, loadPrcFileData
+import json
 
 loadPrcFileData("", "load-file-type p3assimp")
 
 
 class Room(ShowBase):
-    def __init__(self):
+    def __init__(self, debug: bool = False, aggregation_path: str | None = None):
         super().__init__()
 
         self.disableMouse()
+        self.debug = debug
+        if aggregation_path:
+            with open(aggregation_path, "rb") as f:
+                self.aggregations = json.load(f)
 
         self.environ = self.loader.loadModel(
             "/Users/albertlungu/Local/GitHub/Seer/data/reconstructions/obj/albert_room.obj"
@@ -79,6 +84,27 @@ class Room(ShowBase):
 
         self.accept("wheel_up", self.zoom, [-self.delta_zoom])
         self.accept("wheel_down", self.zoom, [self.delta_zoom])
+
+    def show_bbox(self):
+        colors = [
+            (1, 0, 0, 1),
+            (0, 1, 0, 1),
+            (0, 0, 1, 1),
+            (1, 1, 0, 1),
+            (1, 0, 1, 1),
+            (0, 1, 1, 1),
+            (1, 0.5, 0, 1),
+            (0.5, 0, 1, 1),
+        ]
+        for i, (obj_name, coords) in enumerate(self.aggregations.items()):
+            color = colors[i % len(colors)]
+            for coord in coords:
+                sphere = self.loader.loadModel("models/misc/sphere")
+                sphere.setScale(0.02)
+                sphere.setPos(coord[0], coord[1], coord[2])
+                sphere.setColor(*color)
+                sphere.reparentTo(self.render)
+
 
     def toggle_mouse_lock(self):
         """
@@ -180,5 +206,6 @@ class Room(ShowBase):
         self.move_speed = max(0.1, min(10, self.move_speed + delta))
 
 
-app = Room()
+app = Room(True, aggregation_path="./data/env_imgs/colmap_albert_room/aggregations/aggregations.json")
+app.show_bbox()
 app.run()
