@@ -89,16 +89,17 @@ class Raycast:
         if self.debug:
             print(f"{Fore.RED}DEBUG: Creating COLMAP map.")
 
-        maps = pycolmap.incremental_mapping(
-            database_path=self.db_path,
-            image_path=self.img_path,
-            output_path=self.output_path,
-        )
+        # maps = pycolmap.incremental_mapping(
+        #     database_path=self.db_path,
+        #     image_path=self.img_path,
+        #     output_path=self.output_path,
+        # )
 
         if self.debug:
             print("DEBUG: Map has been created.")
 
-        recon = maps[0]
+        # recon = maps[0]
+        recon = pycolmap.Reconstruction(os.path.join(self.output_path, "0"))
 
         poses: dict[
             str, tuple[np.ndarray, np.ndarray, np.ndarray] | None
@@ -151,6 +152,10 @@ class Raycast:
         # object_corner_rays: dict[str, list[tuple]] = {}
         poses = self.camera_pose()
         for frame_name, objects in self.all_frame_detections.items():
+            if frame_name not in poses:
+                if self.debug:
+                    print(f"DEBUG: Skipping {frame_name} (no pose)")
+                continue
             rays[frame_name] = {}
             K, R, t = poses[frame_name]
             for obj_name, obj_data in objects.items():
@@ -242,14 +247,22 @@ class Raycast:
                 hit_points[frame_name][obj_name] = hit_points_list
         return hit_points
 
-    def aggregation(self):
+    def aggregate(self) -> dict[str, dict[str, list]]:
+        """
+        Aggregates 3D hit points for each object across all frames.
+
+        Returns:
+            dict[str, dict[str, list]]: The dictionary containing
+        """
         object_points = {}
         hit_points = self.raycast()
         if hit_points:  # To make sure hit points is not empty
             for hp_frame_name, objects in hit_points.items():
                 for hp_obj_name, hit_points_list in objects.items():
+                    object_points[hp_frame_name] = {}
+                    object_points[hp_frame_name][hp_obj_name] = []
                     object_points[hp_frame_name][hp_obj_name].extend(
-                        [pt for pt in hit_points_list if pt is not None]
+                        [point for point in hit_points_list if point is not None]
                     )
         return object_points
 
@@ -263,7 +276,8 @@ def main():
         obj_path=OBJ_PATH,
         debug=True,
     )
-    raycaster.raycast()
+    # raycaster.raycast()
+    raycaster.aggregate()
 
 
 if __name__ == "__main__":
@@ -272,4 +286,6 @@ if __name__ == "__main__":
     finally:
         sys.stdout.close()
         sys.stderr.close()
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
     print(f"{Fore.RED}All debug messages saved to {log_path}")
