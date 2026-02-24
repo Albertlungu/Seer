@@ -11,6 +11,7 @@ import pycolmap
 database_path = Path("./data/env_imgs/colmap_albert_room/database.db")
 image_path = Path("./data/env_imgs/albert_room")
 output_path = Path("./data/env_imgs/colmap_albert_room/output")
+DATABSE_PATH = "./data/env_imgs/colmap_albert_room/database.db"
 
 
 class COLMAP:
@@ -21,10 +22,13 @@ class COLMAP:
 
     def generate_database(self):
         pycolmap.extract_features(self.db_path, self.img_path)
-        pairing = pycolmap.SequentialPairingOptions(overlap=10)
+        pairing = pycolmap.SequentialPairingOptions(overlap=20)
         pycolmap.match_sequential(self.db_path, pairing_options=pairing)
 
     # generate_database(database_path, image_path)
 
 
 colmap_instance = COLMAP(database_path, image_path, output_path)
+colmap_instance.generate_database()
+# db = pycolmap.Database(DATABSE_PATH)
+# check if frame_0001 exists in the database
