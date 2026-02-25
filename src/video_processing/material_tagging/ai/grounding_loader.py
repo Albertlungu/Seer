@@ -5,12 +5,14 @@ Using the Grounding DINO object detection model to calculate bounding boxes.
 """
 
 import json
-from typing import TypedDict
+from typing import Any, Literal, TypedDict, cast
 
 import torch
 from colorama import Fore, init
 from PIL import Image
 from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
+
+from ..raycasting import Detections
 
 init(autoreset=True)
 
@@ -24,7 +26,7 @@ class Result(TypedDict):
     labels: list[str]
 
 
-def setup_torch() -> tuple:
+def setup_torch() -> tuple[Literal["cuda", "mps"], str, Any, Any]:
     """
     Sets up the Grounding DINO model with PyTorch
 
@@ -38,11 +40,14 @@ def setup_torch() -> tuple:
     processor = AutoProcessor.from_pretrained(model_id)
     model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(device)
 
-    return processor, model, device, model_id
+    return device, model_id, processor, model
 
 
 def run_detection(
-    image_folder: str, all_detections: dict, setup_output: tuple, debug: bool = False
+    image_folder: str,
+    all_detections: Detections,
+    setup_output: tuple[Literal["cuda", "mps"], str, Any, Any],
+    debug: bool = False,
 ) -> dict[str, Result]:
     """
     Runs the Grounding DINO model on a folder of images to return the bboxes.
@@ -53,11 +58,21 @@ def run_detection(
         debug (bool, optional): Whether to print debug messages. Defaults to False.
 
     Returns:
-        dict[str, Result]: A dictionary referring one result to each frame
+        dict[str, Result]: A dictionary referring one result to each frame.
+                            Result - dict:
+                                - scores: List of shape [N] with confidence values 0-1
+                                    Each entry refers to a single object's confidence value
+                                - boxes: List of shape [N, 4] in pixel XYXY format
+                                    [x_min, y_min, x_max, y_max], where N is number of objects
+                                    Each entry is the bounding box of a single object
+                                - labels: List of N strings
+                                    Each string is a text label for each box, i.e. an object.
     """
-    processor, model, device, _ = setup_output
+    device: Literal["cuda", "mps"] = setup_output[0]
+    processor: Any = setup_output[2]
+    model: Any = setup_output[3]
 
-    results = {}
+    results: dict[str, Result] = {}
 
     for frame_name, obj in all_detections.items():
         frame_path = image_folder + f"/{frame_name}"
@@ -89,16 +104,18 @@ def run_detection(
             target_sizes=[
                 image.size[::-1]
             ],  # reversing the values: sequence[start:stop:increment], start & stop are default, increment -1
-        )
-        results[frame_name] = results[frame_name][
-            0
-        ]  # results[frame_name] is originally a list of a single dict
+        )[0]  # is originally a list of a single dict
         if debug:
             print(f"{Fore.BLUE} DEBUG: {results[frame_name]}")
 
         for key, value in results[frame_name].items():
             if not isinstance(value, list):
-                results[frame_name][key] = value.tolist()
+                tensor_value = cast(
+                    torch.Tensor, value
+                )  # `cast` says "this is a Tensor, trust me"
+                results[frame_name][key] = (
+                    tensor_value.tolist()
+                )  # so there's no linting errors
 
         if debug:
             print(f"{Fore.GREEN} DEBUG: {results[frame_name]}")
@@ -113,7 +130,7 @@ def save_results(output_folder: str, results: dict[str, Result]) -> None:
 
 def main():
     with open(JSON_PATH, "r") as f:
-        detections = json.load(f)
+        detections: Detections = json.load(f)
 
     results = run_detection(IMAGES_PATH, detections, setup_torch(), debug=True)
     save_results(output_folder="./data/vision_json", results=results)
