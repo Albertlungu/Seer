@@ -93,7 +93,7 @@ def run_detection(
         text = ""  # initialize as an empty string
 
         for obj_name, obj_data in obj.items():
-            text += f" . {obj_name}" if text else obj_name
+            text += f" . {obj_data['name']}" if text else obj_name
             # If it is the first element, do not include " . "
         if debug:
             print(f"{Fore.GREEN} DEBUG: {text}")
