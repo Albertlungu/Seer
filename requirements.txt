@@ -1,10 +1,13 @@
 # Utility
+pillow
 colorama
 python-dotenv
 
 # AI/ML APIs
 google-genai
 openai
+torch
+transformers
 
 # 3D/Graphics
 open3d
