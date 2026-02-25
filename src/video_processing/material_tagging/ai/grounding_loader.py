@@ -28,8 +28,8 @@ Detections = dict[str, dict[str, ObjectData]]
 
 
 class Result(TypedDict):
-    boxes: torch.Tensor  # Shape: (N, 4), where N is number of objects
-    scores: torch.Tensor  # Shape: (N,) the number of objects
+    scores: torch.Tensor | list  # Shape: (N,) the number of objects
+    boxes: torch.Tensor | list[list]  # Shape: (N, 4), where N is number of objects
     labels: list[str]
 
 
@@ -130,7 +130,49 @@ def run_detection(
     return results
 
 
+def normalize(image_folder: str, results: dict[str, Result]) -> dict[str, Result]:
+    """
+    Returns the normalized coordinates for each corner of a bounding box.
+
+    Args:
+        image_folder (str): Path to the folder containing images.
+        results (dict[str, Result]): The result from running the detection, containing the actual bounding boxes.
+
+    Returns:
+        dict[str, Result]: Same results dictionary but with normalized values for bounding boxes, and in corner format.
+    """
+    image = Image.open(image_folder + "/frame_0001.jpg")
+    w, h = image.size  # Getting image size in px
+
+    n_results = results
+    for frame_name, result in results.items():
+        boxes = []  # empty list
+        for box in result["boxes"]:
+            for x_min, y_min, x_max, y_max in box:
+                nx_min = x_min / w
+                ny_min = y_min / h
+                nx_max = x_max / w
+                ny_max = y_max / h
+                corners = [
+                    [nx_min, ny_min],  # top left
+                    [nx_max, ny_min],  # top right
+                    [nx_min, ny_max],  # bottom left
+                    [nx_max, ny_max],  # bottom right
+                ]
+            boxes.append(corners)
+        n_results[frame_name]["boxes"] = boxes
+
+    return n_results
+
+
 def save_results(output_folder: str, results: dict[str, Result]) -> None:
+    """
+    Saves a set of results to a JSON file
+
+    Args:
+        output_folder (str): Path to the folder in which file should be saved.
+        results (dict[str, Result]): The bounding box results. Normalized or not.
+    """
     with open(output_folder + "/grounding.json", "w") as f:
         json.dump(results, f, indent=2)
 
@@ -140,7 +182,8 @@ def main():
         detections: Detections = json.load(f)
 
     results = run_detection(IMAGES_FOLDER, detections, setup_torch(), debug=True)
-    save_results(output_folder="./data/vision_json", results=results)
+    normalized = normalize(IMAGES_FOLDER, results=results)
+    save_results(output_folder="./data/vision_json", results=normalized)
 
 
 if __name__ == "__main__":
