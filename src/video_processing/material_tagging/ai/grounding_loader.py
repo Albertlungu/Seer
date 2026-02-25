@@ -148,17 +148,17 @@ def normalize(image_folder: str, results: dict[str, Result]) -> dict[str, Result
     for frame_name, result in results.items():
         boxes = []  # empty list
         for box in result["boxes"]:
-            for x_min, y_min, x_max, y_max in box:
-                nx_min = x_min / w
-                ny_min = y_min / h
-                nx_max = x_max / w
-                ny_max = y_max / h
-                corners = [
-                    [nx_min, ny_min],  # top left
-                    [nx_max, ny_min],  # top right
-                    [nx_min, ny_max],  # bottom left
-                    [nx_max, ny_max],  # bottom right
-                ]
+            x_min, y_min, x_max, y_max = box
+            nx_min = x_min / w
+            ny_min = y_min / h
+            nx_max = x_max / w
+            ny_max = y_max / h
+            corners = [
+                [nx_min, ny_min],  # top left
+                [nx_max, ny_min],  # top right
+                [nx_min, ny_max],  # bottom left
+                [nx_max, ny_max],  # bottom right
+            ]
             boxes.append(corners)
         n_results[frame_name]["boxes"] = boxes
 
