@@ -12,12 +12,19 @@ from colorama import Fore, init
 from PIL import Image
 from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
-from ..raycasting import Detections
-
 init(autoreset=True)
 
-IMAGES_PATH = "./data/env_imgs/albert_room"
-JSON_PATH = "./data/vision_json/albert_room.json"
+IMAGES_FOLDER = "./data/env_imgs/albert_room"
+JSON_FOLDER = "./data/vision_json"
+
+
+class ObjectData(TypedDict):
+    name: str
+    materials: list[str]
+    bounding_box: list[list[float]]
+
+
+Detections = dict[str, dict[str, ObjectData]]
 
 
 class Result(TypedDict):
@@ -78,8 +85,8 @@ def run_detection(
         frame_path = image_folder + f"/{frame_name}"
 
         if debug:
-            print(f"{Fore.RED} DEBUG: {frame_name}")
-            print(f"{Fore.RED} DEBUG: {frame_path}")
+            print(f"{Fore.GREEN} DEBUG: {frame_name}")
+            print(f"{Fore.GREEN} DEBUG: {frame_path}")
 
         image = Image.open(frame_path)
 
@@ -89,7 +96,7 @@ def run_detection(
             text += f" . {obj_name}" if text else obj_name
             # If it is the first element, do not include " . "
         if debug:
-            print(f"{Fore.RED} DEBUG: {text}")
+            print(f"{Fore.GREEN} DEBUG: {text}")
 
         inputs = processor(images=image, text=text, return_tensors="pt").to(device)
 
@@ -106,7 +113,7 @@ def run_detection(
             ],  # reversing the values: sequence[start:stop:increment], start & stop are default, increment -1
         )[0]  # is originally a list of a single dict
         if debug:
-            print(f"{Fore.BLUE} DEBUG: {results[frame_name]}")
+            print(f"{Fore.GREEN} DEBUG: {results[frame_name]}")
 
         for key, value in results[frame_name].items():
             if not isinstance(value, list):
@@ -118,7 +125,7 @@ def run_detection(
                 )  # so there's no linting errors
 
         if debug:
-            print(f"{Fore.GREEN} DEBUG: {results[frame_name]}")
+            print(f"{Fore.CYAN} DEBUG: {results[frame_name]}")
 
     return results
 
@@ -129,10 +136,10 @@ def save_results(output_folder: str, results: dict[str, Result]) -> None:
 
 
 def main():
-    with open(JSON_PATH, "r") as f:
+    with open(JSON_FOLDER + "/gemma.json", "r") as f:
         detections: Detections = json.load(f)
 
-    results = run_detection(IMAGES_PATH, detections, setup_torch(), debug=True)
+    results = run_detection(IMAGES_FOLDER, detections, setup_torch(), debug=True)
     save_results(output_folder="./data/vision_json", results=results)
 
 
