@@ -8,9 +8,9 @@ if it's because of Gemma.
 import json
 import os
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
-JSON_PATH = "./data/vision_json/albert_room.json"
+JSON_PATH = "./data/vision_json/full_detections.json"
 IMAGES_PATH = "./data/env_imgs/albert_room"
 OUTPUT_PATH = "./logs/bboxes"
 
@@ -58,16 +58,27 @@ def draw_bboxes(
         for i, (obj_name, obj_data) in enumerate(objects.items()):
             color = COLORS[i % len(COLORS)]
             bbox = obj_data["bounding_box"]
+            if not bbox:
+                continue
 
             # Convert normalized coords to pixel coords
+            # bbox corners: [TL, TR, BL, BR]
             points = [(nx * w, ny * h) for nx, ny in bbox]
 
-            # Draw polygon (closed rectangle)
-            draw.polygon(points, outline=color, width=3)
+            # Reorder to TL, TR, BR, BL for a proper rectangle polygon
+            tl, tr, bl, br = points
+            rect = [tl, tr, br, bl]
+            draw.polygon(rect, outline=color, width=3)
+
+            # Draw corner markers
+            r = 4
+            for px, py in points:
+                draw.ellipse((px - r, py - r, px + r, py + r), fill=color)
 
             # Label
             label_x, label_y = points[0]
-            draw.text((label_x, label_y - 15), obj_data["name"], fill=color)
+            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 24)
+            draw.text((label_x, label_y - 28), obj_data["name"], fill=color, font=font)
 
         img.save(os.path.join(output_path, fname))
         print(f"Saved {fname}")

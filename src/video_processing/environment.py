@@ -4,11 +4,14 @@
 Creates the 3D environment in which the user can move around.
 """
 
-from direct.showbase.ShowBase import ShowBase
-from panda3d.core import WindowProperties, loadPrcFileData
 import json
 
+from direct.showbase.ShowBase import ShowBase
+from panda3d.core import WindowProperties, loadPrcFileData
+
 loadPrcFileData("", "load-file-type p3assimp")
+
+AGGREGATION_PATH = "./data/vision_json/aggregations.json"
 
 
 class Room(ShowBase):
@@ -104,7 +107,6 @@ class Room(ShowBase):
                 sphere.setPos(coord[0], coord[1], coord[2])
                 sphere.setColor(*color)
                 sphere.reparentTo(self.render)
-
 
     def toggle_mouse_lock(self):
         """
@@ -206,6 +208,9 @@ class Room(ShowBase):
         self.move_speed = max(0.1, min(10, self.move_speed + delta))
 
 
-app = Room(True, aggregation_path="./data/env_imgs/colmap_albert_room/aggregations/aggregations.json")
+app = Room(
+    True,
+    aggregation_path=AGGREGATION_PATH,
+)
 app.show_bbox()
 app.run()

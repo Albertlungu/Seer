@@ -318,11 +318,27 @@ def build_detection_json(
         with open(grounding_output, "rb") as f:
             grounding_detections = json.load(f)
 
-        for frame_name, object in frame_detections.items():
-            boxes: list = grounding_detections[frame_name]["boxes"]
-            for box in boxes:
-                for _, obj_data in object.items():
-                    obj_data["bounding_box"] = box
+        for frame_name, objects in frame_detections.items():
+            g = grounding_detections[frame_name]
+            boxes: list = g["boxes"]
+            labels: list = g["labels"]
+            scores: list = g["scores"]
+
+            # For each Gemma object, find the best matching Grounding DINO detection
+            for obj_key, obj_data in objects.items():
+                obj_name = obj_data["name"].lower()
+                best_box = None
+                best_score = -1.0
+
+                for label, box, score in zip(labels, boxes, scores):
+                    if label.lower() == obj_name and score > best_score:
+                        best_box = box
+                        best_score = score
+
+                if best_box is not None:
+                    obj_data["bounding_box"] = best_box
+                else:
+                    obj_data["bounding_box"] = []
     else:
         print(f"{Fore.RED} File did not exist.")
 
