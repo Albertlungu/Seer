@@ -354,6 +354,7 @@ def save_detection(
     all_detections = frame_detections
     with open(detection_output, "w") as f:
         json.dump(all_detections, f, indent=2)
+    print(f"{Fore.GREEN}Built full Detections JSON. Check {detection_output}")
 
 
 def main():

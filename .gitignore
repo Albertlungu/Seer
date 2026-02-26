@@ -216,3 +216,4 @@ data/*/
 *.mov
 *.obj
 .vscode
+.claude

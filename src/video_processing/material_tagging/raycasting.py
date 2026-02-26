@@ -103,36 +103,45 @@ class Raycast:
             str, tuple[np.ndarray, np.ndarray, np.ndarray] | None
         ] = {}  # { image_name: (K, R, t) }
 
-        for i in range(
-            len([entry for entry in Path(self.output_path).iterdir() if entry.is_dir()])
-        ):
-            recon = pycolmap.Reconstruction(os.path.join(self.output_path, str(i)))
+        # for i in range(
+        #     len([entry for entry in Path(self.output_path).iterdir() if entry.is_dir()])
+        # ):
+        #     recon = pycolmap.Reconstruction(os.path.join(self.output_path, str(i)))
+        recon_dirs = sorted(
+            [entry for entry in Path(self.output_path).iterdir() if entry.is_dir()],
+            key=lambda d: d.name,
+        )
+        best_recon = None
+        best_count = 0
 
+        for d in recon_dirs:
+            r = pycolmap.Reconstruction(str(d))
+            if len(r.images) > best_count:
+                best_count = len(r.images)
+                best_recon = r
+
+        if best_recon is None:
+            raise RuntimeError("No valid COLMAP reconstruction found")
+
+        for img_id, img in best_recon.images.items():
             if self.debug:
-                print(recon.images)
+                print(best_recon.images)
+            cam = best_recon.cameras[img.camera_id]
+            if self.debug:
+                print(f"{Fore.RED}DEBUG: Image name is: {img.name}")
+                # print(f"{Fore.RED}DEBUG: {dir(cam)}")
+                # print(f"{Fore.RED}DEBUG: {dir(img.cam_from_world)}")
 
-            for (
-                img_id,
-                img,
-            ) in (
-                recon.images.items()
-            ):  # recon.images: dict, img_id: str (the image name), img: Image
-                cam = recon.cameras[img.camera_id]
-                if self.debug:
-                    print(f"{Fore.RED}DEBUG: Image name is: {img.name}")
-                    # print(f"{Fore.RED}DEBUG: {dir(cam)}")
-                    # print(f"{Fore.RED}DEBUG: {dir(img.cam_from_world)}")
+            fx = cam.focal_length_x
+            fy = cam.focal_length_y
+            cx = cam.principal_point_x
+            cy = cam.principal_point_y
+            K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
+            R: np.ndarray = img.cam_from_world().rotation.matrix()
+            t: np.ndarray = img.cam_from_world().translation
 
-                fx = cam.focal_length_x
-                fy = cam.focal_length_y
-                cx = cam.principal_point_x
-                cy = cam.principal_point_y
-                K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
-                R: np.ndarray = img.cam_from_world().rotation.matrix()
-                t: np.ndarray = img.cam_from_world().translation
-
-                if img.name not in poses:  # To avoid duplicates
-                    poses[img.name] = (K, R, t)
+            if img.name not in poses:  # To avoid duplicates
+                poses[img.name] = (K, R, t)
 
         return poses
 

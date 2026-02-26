@@ -106,7 +106,7 @@ class Room(ShowBase):
                 sphere.setScale(0.02)
                 sphere.setPos(coord[0], coord[1], coord[2])
                 sphere.setColor(*color)
-                sphere.reparentTo(self.render)
+                sphere.reparentTo(self.environ)
 
     def toggle_mouse_lock(self):
         """
