@@ -34,13 +34,13 @@ class ObjectData(TypedDict):
     bounding_box: list[list[float]]
 
 
-Detection = dict[str, dict[str, ObjectData]]
-
-
 class Result(TypedDict):
     scores: torch.Tensor | list  # Shape: (N,) the number of objects
     boxes: torch.Tensor | list[list]  # Shape: (N, 4), where N is number of objects
     labels: list[str]
+
+
+Detection = dict[str, dict[str, ObjectData]]
 
 
 class Gemma:

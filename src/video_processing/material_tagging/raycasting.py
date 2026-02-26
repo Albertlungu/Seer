@@ -6,7 +6,6 @@ The full raycasting pipeline, including the camera pose calculator.
 
 import json
 import os
-import sys
 from pathlib import Path
 from typing import TypedDict
 
@@ -20,15 +19,15 @@ log_path = "logs/video_processing/material_tagging/raycasting.log"
 
 os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-sys.stdout = open(log_path, "w")
-sys.stderr = open(log_path, "a")
+# sys.stdout = open(log_path, "w")
+# sys.stderr = open(log_path, "a")
 
 DATABSE_PATH = "./data/env_imgs/colmap_albert_room/database.db"
 IMAGES_PATH = "./data/env_imgs/albert_room"
 OUTPUT_PATH = "./data/env_imgs/colmap_albert_room/output"
-JSON_PATH = "./data/vision_json/albert_room.json"
+JSON_PATH = "./data/vision_json/full_detections.json"
 OBJ_PATH = "./data/reconstructions/obj/albert_room.obj"
-AGGREGATIONS_PATH = "./data/env_imgs/colmap_albert_room/aggregations/aggregations.json"
+AGGREGATIONS_PATH = "./data/vision_json/aggregations.json"
 
 init(autoreset=True)
 
@@ -88,8 +87,7 @@ class Raycast:
         Returns:
             dict: Dictionary with camera poses.
         """
-        if self.debug:
-            print(f"{Fore.RED}DEBUG: Creating COLMAP map.")
+        print(f"{Fore.GREEN}Creating COLMAP map.")
 
         # maps = pycolmap.incremental_mapping(
         #     database_path=self.db_path,
@@ -97,8 +95,7 @@ class Raycast:
         #     output_path=self.output_path,
         # )
 
-        if self.debug:
-            print("DEBUG: Map has been created.")
+        print(f"{Fore.GREEN}Map has been created.")
 
         # recon = maps[0]
 
@@ -155,6 +152,8 @@ class Raycast:
                                             ]
                                           }
         """
+        print(f"{Fore.GREEN}Starting Unprojection")
+
         rays = {}
         # object_corner_rays: dict[str, list[tuple]] = {}
         poses = self.camera_pose()
@@ -187,6 +186,7 @@ class Raycast:
                 rays[frame_name][obj_name] = rays_list
                 if self.debug:
                     print(f"DEBUG: {frame_name}")
+        print(f"{Fore.GREEN}Ended Unprojection")
         return rays
 
     def setup_scene(self) -> o3d.t.geometry.RaycastingScene:
@@ -196,6 +196,7 @@ class Raycast:
         Returns:
             o3d.t.geometry.RaycastingScene: Open3D raycasting scene with the mesh loaded.
         """
+        print(f"{Fore.GREEN}Setting up the scene...")
         mesh_o3d = o3d.io.read_triangle_mesh(self.obj_path)
         mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(mesh_o3d)
         scene = o3d.t.geometry.RaycastingScene()
@@ -221,6 +222,7 @@ class Raycast:
         Returns:
             dict[str, dict[str, list[np.ndarray]]]: Dictionary containing all rays for each object.
         """
+        print(f"{Fore.GREEN}Starting Raycasting now...")
         rays = self.unprojection()
         scene = self.setup_scene()
         hit_points = {}
@@ -261,6 +263,7 @@ class Raycast:
         Returns:
             dict[str, list]: The dictionary containing all hit points, top level being each object
         """
+        print(f"{Fore.GREEN}Starting aggregation")
         object_points: dict[str, list] = {}
         hit_points = self.raycast()
         if hit_points:
@@ -285,21 +288,23 @@ def main():
         output_path=OUTPUT_PATH,
         json_path=JSON_PATH,
         obj_path=OBJ_PATH,
-        debug=True,
+        debug=False,
     )
     # raycaster.raycast()
     aggregations = raycaster.aggregate()
     # print(aggregations)
     with open(AGGREGATIONS_PATH, "w") as f:
         json.dump(aggregations, f, indent=2)
+    print("Aggregations added to JSON. Check data folder.")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    finally:
-        sys.stdout.close()
-        sys.stderr.close()
-        sys.stdout = sys.__stdout__
-        sys.stderr = sys.__stderr__
-    print(f"{Fore.RED}All debug messages saved to {log_path}")
+    # try:
+    #     main()
+    # finally:
+    #     sys.stdout.close()
+    #     sys.stderr.close()
+    #     sys.stdout = sys.__stdout__
+    #     sys.stderr = sys.__stderr__
+    # print(f"{Fore.RED}All debug messages saved to {log_path}")
+    main()
