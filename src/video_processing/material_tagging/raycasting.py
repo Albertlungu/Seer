@@ -166,6 +166,9 @@ class Raycast:
         rays = {}
         # object_corner_rays: dict[str, list[tuple]] = {}
         poses = self.camera_pose()
+
+        R_align, t_align, scale = self.compute_alignment()
+
         for frame_name, objects in self.all_frame_detections.items():
             if frame_name not in poses:
                 if self.debug:
@@ -173,6 +176,9 @@ class Raycast:
                 continue
             rays[frame_name] = {}
             K, R, t = poses[frame_name]
+
+            c_colmap = -R.T @ t
+            c_obj = scale * (R_align @ c_colmap) + t_align
             for obj_name, obj_data in objects.items():
                 bbox = obj_data["bounding_box"]
                 rays_list = []
@@ -186,12 +192,11 @@ class Raycast:
                     ray_cam = np.linalg.inv(K) @ pixel_h
                     ray_cam /= np.linalg.norm(ray_cam)
 
-                    ray_world = R.T @ ray_cam
-                    ray_world /= np.linalg.norm(ray_world)
+                    ray_colmap = R.T @ ray_cam
+                    ray_obj = R_align @ ray_colmap
+                    ray_obj /= np.linalg.norm(ray_obj)
 
-                    origin = -R.T @ t
-
-                    rays_list.append((origin, ray_world))
+                    rays_list.append((c_obj, ray_obj))
                 rays[frame_name][obj_name] = rays_list
                 if self.debug:
                     print(f"DEBUG: {frame_name}")
@@ -288,6 +293,100 @@ class Raycast:
                         ]
                     )  # Convert to list since JSON cannot serialize numpy arrays
         return object_points
+
+    def compute_alignment(self) -> tuple[np.ndarray, np.ndarray, float]:
+        """
+        Computes the similarity transform (R_align, t_align, scale) that maps
+        COLMAP world coordinates into the OBJ mesh coordinate system using ICP.
+
+        Returns:
+            tuple: (R_align, t_align, scale) where:
+                - R_align: 3x3 rotation matrix
+                - t_align: 3x1 translation vector
+                - scale: uniform scale factor
+            Usage: point_obj = scale * (R_align @ point_colmap) + t_align
+        """
+        recon_dirs = sorted(
+            [entry for entry in Path(self.output_path).iterdir() if entry.is_dir()],
+            key=lambda d: d.name,
+        )
+        best_recon = None
+        best_count = 0
+        for d in recon_dirs:
+            r = pycolmap.Reconstruction(str(d))
+            if len(r.images) > best_count:
+                best_count = len(r.images)
+                best_recon = r
+
+        colmap_points = np.array([p.xyz for p in best_recon.points3D.values()])
+        mesh = o3d.io.read_triangle_mesh(self.obj_path)
+        obj_vertices = np.asarray(mesh.vertices)
+
+        source_pcd = o3d.geometry.PointCloud()
+        source_pcd.points = o3d.utility.Vector3dVector(colmap_points)
+
+        target_pcd = o3d.geometry.PointCloud()
+        target_pcd.points = o3d.utility.Vector3dVector(obj_vertices)
+
+        voxel_size = 0.05
+        source_down = source_pcd.voxel_down_sample(voxel_size)
+        target_down = target_pcd.voxel_down_sample(voxel_size)
+
+        source_down.estimate_normals(
+            o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30)
+        )
+        target_down.estimate_normals(
+            o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30)
+        )
+
+        source_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+            source_down,
+            o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30),
+        )
+        target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+            target_down,
+            o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30),
+        )
+
+        coarse = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+            source_down,
+            target_down,
+            source_fpfh,
+            target_fpfh,
+            mutual_filter=True,
+            max_correspondence_distance=voxel_size * 3,
+            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(
+                with_scaling=True
+            ),
+            ransac_n=3,
+            checkers=[
+                o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
+                o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(
+                    voxel_size * 3
+                ),
+            ],
+            criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(
+                max_iteration=100000, confidence=0.999
+            ),
+        )
+
+        refined = o3d.pipelines.registration.registration_icp(
+            source_down,
+            target_down,
+            max_correspondence_distance=voxel_size * 1.5,
+            init=coarse.transformation,
+            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(
+                with_scaling=True
+            ),
+        )
+
+        T = refined.transformation
+        R_scaled = T[:3, :3]
+        t_align = T[:3, 3]
+        scale = np.cbrt(np.linalg.det(R_scaled))
+        R_align = R_scaled / scale
+
+        return R_align, t_align, scale
 
 
 def main():
