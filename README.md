@@ -51,3 +51,38 @@ pip install aspose-3d
 
 > [!NOTE]
 > On macOS Apple Silicon (`arm64`), a compatible `aspose-3d` wheel may be unavailable. In that case, use an alternative USDZ converter or an `x86_64` Python environment.
+
+## Manual Annotator
+
+Use this to draw 3D bounding boxes directly on the reconstructed mesh.
+
+### Run
+
+From the repo root:
+
+```bash
+source venv/bin/activate
+python src/video_processing/annotator.py
+```
+
+### Controls
+
+- `e` — toggle annotation mode on/off
+- `mouse1` (in idle) — place anchor on mesh
+- move mouse (drawing) — preview base rectangle
+- `mouse1` (drawing) — lock base rectangle
+- move mouse (height) — preview extrusion height
+- `mouse1` (height) — lock height and spawn corner handles
+- `mouse1` on handle + drag — resize box
+- `mouse1-up` — release handle
+- `space` (editing) — open dialog to save name/materials
+- `tab` — discard current in-progress box and move to next colour
+- `control-s` — save all annotations
+
+### Output
+
+Saved annotations are written to:
+
+`data/vision_json/annotations.json`
+
+The JSON includes object name, materials, bottom/top corners, and base normal.
