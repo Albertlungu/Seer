@@ -11,7 +11,7 @@ from __future__ import annotations
 from enum import Enum, auto
 
 import open3d as o3d
-from direct.showbase.ShowBase import ShowBase
+from environment import Room
 from panda3d.core import (
     BitMask32,
     CollisionHandlerQueue,
@@ -97,41 +97,16 @@ ALLOWED_TRANSITIONS: dict[AnnotatorState, set[AnnotatorState]] = {
 }
 
 
-class BoxAnnotator(ShowBase):
+class BoxAnnotator(Room):
     def __init__(self):
+        # Initialize Room (parent class) - sets up environment, camera, input handling
         super().__init__()
-        self.disableMouse()
 
-        self.environ = self.loader.loadModel(OBJ_PATH)
-        self.environ.reparentTo(self.render)
-        self.environ.setP(90)
-        self.environ.setTwoSided(True)
-        bounds = self.environ.getTightBounds()
-        mid = (bounds[0] + bounds[1]) / 2  # Setting the middle of the scene
-        self.environ.setPos(-mid.x, -mid.y, -mid.z)
-
+        # Set up Open3D raycasting for mesh intersections
         mesh = o3d.io.read_triangle_mesh(OBJ_PATH)
         mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
-
         self.o3d_scene = o3d.t.geometry.RaycastingScene()
         self.o3d_scene.add_triangles(mesh_t)
-
-        self.camLens.setNear(0.01)
-        self.camLens.setFov(90)  # Will be adjustable
-
-        # Movement
-        self.sensitivity = 0.1
-        self.heading = 0
-        self.pitch = 0
-        self.mouse_locked = True
-        self.move_speed = 1.5
-        self.delta_speed = 0.5
-        # Setting the keys to false as default
-        self.keys = {"w": False, "s": False, "a": False, "d": False}
-
-        props = WindowProperties()
-        props.setCursorHidden(True)  # Hiding the cursor
-        self.win.requestProperties(props)
 
         # Drawing the actual "+" crosshair
         # Units: normalized, [1, 1]
@@ -144,19 +119,17 @@ class BoxAnnotator(ShowBase):
         ls.drawTo(0, 0, 0.02)
         self.render2d.attachNewNode(ls.create())  # Renders it
 
-        # Making the annotations states
+        # Annotation state machine
         self.state = AnnotatorState.NAVIGATING  # Default navigation
         self.color_idx = 0
         self.annotations = {}  # Storing them in a dict (will go to JSON)
         self.dialog = None
 
-        # Making the box geometry states, which reset between annotations
-        self.anchor = (
-            None  # The point that is clicked first on the mesh, acting as an anchor
-        )
-        self.normal = None  # The vector that points perpendicular to a surface (not in the plane of the surface)
-        self.T1 = None  # The vector tangent on the plane of the surface
-        self.T2 = None  # The vector perpendicular to T1 on the same plane
+        # Box geometry state (reset between annotations)
+        self.anchor = None  # The first clicked point on the mesh
+        self.normal = None  # Surface normal at anchor
+        self.T1 = None  # First tangent vector on surface plane
+        self.T2 = None  # Second tangent vector perpendicular to T1
         self.dx = 0.0  # Distance along T1 (width)
         self.dy = 0.0  # Distance along T2 (length)
         self.height = 0.0
@@ -164,29 +137,18 @@ class BoxAnnotator(ShowBase):
         self.handle_nodes = []
         self.preview_node = self.environ.attachNewNode("preview")
 
-        # Making the collision picker for the handle dragging
+        # Collision picker for handle dragging
         self.picker = CollisionTraverser()
         self.pick_queue = CollisionHandlerQueue()
-        pick_cn = CollisonNode("picker_ray")
+        pick_cn = CollisionNode("picker_ray")
         self.pick_np = self.camera.attachNewNode(pick_cn)
-
         pick_cn.setFromCollideMask(BitMask32.bit(1))
         self.pick_ray = CollisionRay()
         pick_cn.addSolid(self.pick_ray)
         self.picker.addCollider(self.pick_np, self.pick_queue)
 
-        taskMgr.add(self.mouse_look, "mouse-look")
-        taskMgr.add(self.move, "move")
+        # Register annotation-specific tasks and input handlers
         taskMgr.add(self.preview, "preview")
-
-        self.accept("escape", self.toggle_mouse_lock)
-        self.accept("shift-=", self.control_speed, [self.delta_speed])
-        self.accept("-", self.control_speed, [-self.delta_speed])
-        self.accept("wheel_up", self.zoom, [-2])
-        self.accept("wheel_down", self.zoom, [2])
-        for key in self.keys:
-            self.accept(key, self.set_key, [key, True])
-            self.accept(f"{key}-up", self.set_key, [key, False])
 
         self.accept("e", self.toggle_annotate)
         self.accept("mouse1", self.on_click)
@@ -195,20 +157,45 @@ class BoxAnnotator(ShowBase):
         self.accept("tab", self.on_tab)
         self.accept("s", self.save)
 
-    def toggle_mouse_lock(self):
-        pass
+    def _set_state(self, new_state: AnnotatorState):
+        """
+        Changes states.
+
+        Args:
+            new_state (AnnotatorState): The new state to be changed to.
+
+        Raises:
+            RuntimeError: If the transition is invalid (incorrect resultant state)
+        """
+        if new_state == self.state:
+            return
+        if new_state not in ALLOWED_TRANSITIONS[self.state]:
+            raise RuntimeError(f"Invalid transition: {self.state} -> {new_state}")
+        self.state = new_state
 
     def toggle_annotate(self):
+        """
+        Toggles between navigation and idle modes.
+        """
+        if self.state == AnnotatorState.NAVIGATING:
+            self._set_state(AnnotatorState.IDLE)
+            self.mouse_locked = False
+            props = WindowProperties()
+            props.setCursorHidden(False)
+            self.win.requestProperties(props)
+        elif self.state == AnnotatorState.IDLE:
+            self._set_state(AnnotatorState.NAVIGATING)
+            self.mouse_locked = True
+            props = WindowProperties()
+            props.setCursorHidden(True)
+            self.win.requestProperties(props)
+
+    # --- per-frame preview task ---
+
+    def preview(self, task):
         pass
 
-    def control_speed(self, delta):
-        pass
-
-    def zoom(self, delta):
-        pass
-
-    def set_key(self, key, value):
-        pass
+    # --- input handlers ---
 
     def on_click(self):
         pass
@@ -220,6 +207,56 @@ class BoxAnnotator(ShowBase):
         pass
 
     def on_tab(self):
+        pass
+
+    # --- raycasting ---
+
+    def _ray_obj_space(self, screen_pos=None):
+        pass
+
+    def _mouse_ray(self):
+        pass
+
+    def _raycast_center(self):
+        pass
+
+    def _raycast_mouse(self):
+        pass
+
+    def _plane_intersect(self, ray_o, ray_d, plane_p, plane_n):
+        pass
+
+    def _height_from_ray(self, ray_o, ray_d):
+        pass
+
+    # --- box geometry ---
+
+    def _corners(self):
+        pass
+
+    def _rebuild_preview(self):
+        pass
+
+    def _spawn_handles(self):
+        pass
+
+    def _drag_handle(self, ray_o, ray_d):
+        pass
+
+    # --- dialog ---
+
+    def _open_dialog(self):
+        pass
+
+    def confirm_dialog(self):
+        pass
+
+    def cancel_dialog(self):
+        pass
+
+    # --- reset + save ---
+
+    def _reset(self):
         pass
 
     def save(self):
