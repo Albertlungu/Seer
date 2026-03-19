@@ -209,7 +209,7 @@ class BoxAnnotator(Room):
         self.accept("mouse1-up", self.on_click_release)
         self.accept("space", self.on_space)
         self.accept("tab", self.on_tab)
-        self.accept("s", self.save)
+        self.accept("control-s", self.save)
 
     def _set_state(self, new_state: AnnotatorState) -> None:
         """
