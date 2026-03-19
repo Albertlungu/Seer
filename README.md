@@ -31,3 +31,23 @@ Zooming in even more would then bring them to the subatomic level so that they c
 Finally, I bring them to the size of fundamental particles: electrons, quarks, bosons, leptons, etc.
 
 All of the above will be modeled as accurately as possible according to the current best theories in their respective fields.
+
+## Quick Start
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+## Optional Dependency
+
+`aspose-3d` is only required for USDZ to OBJ conversion in `src/video_processing/view_reconstruction.py`.
+
+If you need that conversion flow, install it manually:
+
+```bash
+pip install aspose-3d
+```
+
+> [!NOTE]
+> On macOS Apple Silicon (`arm64`), a compatible `aspose-3d` wheel may be unavailable. In that case, use an alternative USDZ converter or an `x86_64` Python environment.

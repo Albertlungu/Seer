@@ -2,6 +2,7 @@
 pillow
 colorama
 python-dotenv
+numpy
 
 # AI/ML APIs
 google-genai
@@ -12,7 +13,6 @@ transformers
 # 3D/Graphics
 open3d
 panda3d
-ursina
 
 # SfM/Photogrammetry
 pycolmap
