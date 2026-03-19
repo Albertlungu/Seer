@@ -16,6 +16,8 @@ from typing import Any, cast
 import numpy as np
 import open3d as o3d
 from direct.gui.DirectGui import DirectButton, DirectEntry, DirectFrame, DirectLabel
+from direct.gui.OnscreenText import OnscreenText
+from direct.showbase.ShowBaseGlobal import globalClock
 from environment import Room
 from numpy.typing import NDArray
 from panda3d.core import (
@@ -35,6 +37,7 @@ from panda3d.core import (
     Point2,
     Point3,
     PythonTask,
+    TextNode,
     TransparencyAttrib,
     WindowProperties,
     loadPrcFileData,
@@ -169,6 +172,18 @@ class BoxAnnotator(Room):
         self.annotations: dict[str, dict[str, object]] = {}  # Will be saved to JSON
         self.dialog: DirectFrame | None = None
 
+        # Status text in top-right corner (shows current state)
+        self.status_text: OnscreenText = OnscreenText(
+            text="",
+            parent=self.aspect2d,
+            pos=(1.28, 0.93),
+            scale=0.05,
+            fg=(1, 1, 1, 1),
+            align=TextNode.ARight,
+            mayChange=True,
+        )
+        self._update_status_text()
+
         # Making the box geometry states, which reset between annotations
         self.anchor: NDArray[np.float64] | None = (
             None  # The point that is clicked first on the mesh, acting as an anchor
@@ -228,10 +243,20 @@ class BoxAnnotator(Room):
         if new_state not in ALLOWED_TRANSITIONS[self.state]:
             raise RuntimeError(f"Invalid transition: {self.state} -> {new_state}")
         self.state = new_state
+        self._update_status_text()
+
+    def _update_status_text(self) -> None:
+        """
+        Updates top-right status indicator based on current state.
+        """
+        self.status_text.setText(f"{self.state.name}")
 
     def toggle_annotate(self) -> None:
         """
-        Toggles between navigation and idle modes.
+        Toggles between navigation and annotation modes.
+
+        If called in a drafting/editing state, it safely exits annotation mode,
+        discarding in-progress geometry and returning to NAVIGATING.
         """
         if self.state == AnnotatorState.NAVIGATING:
             self._set_state(AnnotatorState.IDLE)
@@ -239,12 +264,92 @@ class BoxAnnotator(Room):
             props: WindowProperties = WindowProperties()
             props.setCursorHidden(False)
             self.win.requestProperties(props)
+
         elif self.state == AnnotatorState.IDLE:
             self._set_state(AnnotatorState.NAVIGATING)
             self.mouse_locked = True
             props: WindowProperties = WindowProperties()
             props.setCursorHidden(True)
             self.win.requestProperties(props)
+
+        elif self.state == AnnotatorState.DIALOG:
+            # Close dialog first so transitions stay valid
+            self.cancel_dialog()
+            self._reset()
+            self._set_state(AnnotatorState.NAVIGATING)
+            self.mouse_locked = True
+            props: WindowProperties = WindowProperties()
+            props.setCursorHidden(True)
+            self.win.requestProperties(props)
+
+        else:
+            # DRAWING / HEIGHT / EDITING
+            self._reset()
+            self._set_state(AnnotatorState.NAVIGATING)
+            self.mouse_locked = True
+            props: WindowProperties = WindowProperties()
+            props.setCursorHidden(True)
+            self.win.requestProperties(props)
+
+    def toggle_mouse_lock(self) -> None:
+        """
+        Handles Escape key safely across all annotator states.
+
+        - NAVIGATING: toggle mouse lock
+        - DIALOG: close dialog and return to editing
+        - Any annotation state: exit annotation mode and return to NAVIGATING
+        """
+        if self.state == AnnotatorState.NAVIGATING:
+            self.mouse_locked = not self.mouse_locked
+            props: WindowProperties = WindowProperties()
+            props.setCursorHidden(self.mouse_locked)
+            self.win.requestProperties(props)
+            return
+
+        if self.state == AnnotatorState.DIALOG:
+            self.cancel_dialog()
+            return
+
+        # IDLE / DRAWING / HEIGHT / EDITING -> exit to navigation safely
+        if self.state in {
+            AnnotatorState.IDLE,
+            AnnotatorState.DRAWING,
+            AnnotatorState.HEIGHT,
+            AnnotatorState.EDITING,
+        }:
+            self._reset()
+            self._set_state(AnnotatorState.NAVIGATING)
+            self.mouse_locked = True
+            props: WindowProperties = WindowProperties()
+            props.setCursorHidden(True)
+            self.win.requestProperties(props)
+
+    def move(self, task: PythonTask) -> PythonTask:
+        """
+        Moves camera only in NAVIGATING mode.
+
+        This prevents WASD from moving camera while the user is annotating.
+
+        Args:
+            task (PythonTask): Panda3D task object.
+
+        Returns:
+            PythonTask: task.cont to keep task running.
+        """
+        if self.state != AnnotatorState.NAVIGATING or not self.mouse_locked:
+            return task.cont
+
+        dt: float = globalClock.getDt()
+        if self.keys["w"]:
+            self.camera.setY(self.camera, self.move_speed * dt)
+        if self.keys["s"]:
+            self.camera.setY(self.camera, -self.move_speed * dt)
+        if self.keys["a"]:
+            self.camera.setX(self.camera, -self.move_speed * dt)
+        if self.keys["d"]:
+            self.camera.setX(self.camera, self.move_speed * dt)
+
+        return task.cont
 
     # --- per-frame preview task ---
 
