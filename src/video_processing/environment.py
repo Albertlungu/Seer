@@ -7,6 +7,7 @@ Creates the 3D environment in which the user can move around.
 import json
 
 from direct.showbase.ShowBase import ShowBase
+from direct.showbase.ShowBaseGlobal import globalClock
 from panda3d.core import WindowProperties, loadPrcFileData
 
 loadPrcFileData("", "load-file-type p3assimp")
@@ -47,10 +48,10 @@ class Room(ShowBase):
         # Hide cursor and center it
         props = WindowProperties()
         props.setCursorHidden(True)
-        base.win.requestProperties(props)
+        self.win.requestProperties(props)
 
         # Register mouse_look as a per-frame task
-        taskMgr.add(self.mouse_look, "mouse-look")
+        self.taskMgr.add(self.mouse_look, "mouse-look")
         # taskMgr is the task manager
         # It makes a function be called every frame to the main loop
         # Args:
@@ -115,7 +116,7 @@ class Room(ShowBase):
         self.mouse_locked = not self.mouse_locked
         props = WindowProperties()
         props.setCursorHidden(self.mouse_locked)
-        base.win.requestProperties(props)
+        self.win.requestProperties(props)
 
     def mouse_look(self, task):
         """

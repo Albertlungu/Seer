@@ -34,7 +34,7 @@ from panda3d.core import (
     LineSegs,
     Point2,
     Point3,
-    Task,
+    PythonTask,
     TransparencyAttrib,
     WindowProperties,
     loadPrcFileData,
@@ -200,8 +200,10 @@ class BoxAnnotator(Room):
         pick_cn.addSolid(self.pick_ray)
         self.picker.addCollider(self.pick_np, self.pick_queue)
 
+        # Register preview task (runs every frame while app is running)
         self.taskMgr.add(self.preview, "preview")
 
+        # Annotation controls (kept separate from inherited movement controls)
         self.accept("e", self.toggle_annotate)
         self.accept("mouse1", self.on_click)
         self.accept("mouse1-up", self.on_click_release)
@@ -221,6 +223,8 @@ class BoxAnnotator(Room):
         """
         if new_state == self.state:
             return
+
+        # Guarding state transitions so handlers cannot jump to invalid state
         if new_state not in ALLOWED_TRANSITIONS[self.state]:
             raise RuntimeError(f"Invalid transition: {self.state} -> {new_state}")
         self.state = new_state
@@ -244,7 +248,7 @@ class BoxAnnotator(Room):
 
     # --- per-frame preview task ---
 
-    def preview(self, task: Task) -> Task:
+    def preview(self, task: PythonTask) -> PythonTask:
         """
         Updates the box preview based on current state and mouse position.
 
@@ -270,6 +274,7 @@ class BoxAnnotator(Room):
                     origin, direction, self.anchor, self.normal
                 )
                 if hit is not None:
+                    # Mapping hit point to tangent frame dimensions (dx, dy)
                     diag: NDArray[np.float64] = hit - self.anchor
                     self.dx = float(np.dot(diag, self.T1))
                     self.dy = float(np.dot(diag, self.T2))
@@ -281,6 +286,7 @@ class BoxAnnotator(Room):
                 self._mouse_ray()
             )
             if ray:
+                # Height is clamped to avoid zero-height faces
                 self.height = max(0.001, self._height_from_ray(*ray))
                 self._rebuild_preview()
 
@@ -355,6 +361,7 @@ class BoxAnnotator(Room):
                 self.pick_queue.sortEntries()
                 name: str = self.pick_queue.getEntry(0).getIntoNode().getName()
                 if name.startswith("handle_"):
+                    # Store corner index so preview task can drag this handle
                     self.dragging_handle = int(name.split("_")[1])
 
     def on_click_release(self) -> None:
@@ -399,6 +406,8 @@ class BoxAnnotator(Room):
 
         near: Point3 = Point3()
         far: Point3 = Point3()
+
+        # Converting 2D screen point -> 3D ray in camera space
         self.camLens.extrude(screen_pos, near, far)
         near_w: Any = self.render.getRelativePoint(self.camera, near)
         far_w: Any = self.render.getRelativePoint(self.camera, far)
@@ -420,6 +429,8 @@ class BoxAnnotator(Room):
         """
         if not self.mouseWatcherNode.hasMouse():
             return None
+
+        # Mouse coords are normalized in range [-1, 1]
         mx: float = self.mouseWatcherNode.getMouseX()
         my: float = self.mouseWatcherNode.getMouseY()
         return self._ray_obj_space(Point2(mx, my))
@@ -442,6 +453,8 @@ class BoxAnnotator(Room):
         )
         res: dict[str, o3d.core.Tensor] = self.o3d_scene.cast_rays(ray)
         t_hit: float = float(res["t_hit"].numpy()[0])
+
+        # No mesh hit means ray did not intersect geometry
         if np.isinf(t_hit):
             return None
 
@@ -502,6 +515,8 @@ class BoxAnnotator(Room):
             NDArray[np.float64] | None: Intersection point if valid.
         """
         denom: float = float(np.dot(ray_d, plane_n))
+
+        # Parallel ray means no stable intersection with this plane
         if abs(denom) < 1e-6:
             return None
 
@@ -543,6 +558,7 @@ class BoxAnnotator(Room):
         if hit is None:
             return self.height
 
+        # Projecting offset onto surface normal gives signed height value
         return float(np.dot(hit - base_center, cast(NDArray[np.float64], self.normal)))
 
     # --- box geometry ---
@@ -635,6 +651,7 @@ class BoxAnnotator(Room):
             sphere.setColor(r, g, b, 1)
             sphere.setPos(*corner)
             cn: CollisionNode = CollisionNode(f"handle_{i}")
+            # Radius 1.0 is local to model scale (sphere node is already scaled down)
             cn.addSolid(CollisionSphere(0, 0, 0, 1.0))
             cn.setIntoCollideMask(BitMask32.bit(1))
             sphere.attachNewNode(cn)
@@ -656,8 +673,10 @@ class BoxAnnotator(Room):
         assert self.dragging_handle is not None
         idx: int = self.dragging_handle
         if idx >= 4:
+            # Top handle modifies only extrusion height
             self.height = max(0.001, self._height_from_ray(ray_o, ray_d))
         else:
+            # Bottom handle re-anchors against opposite corner and updates dx/dy
             assert self.anchor is not None
             assert self.normal is not None
             assert self.T1 is not None
@@ -695,6 +714,7 @@ class BoxAnnotator(Room):
         props.setCursorHidden(False)
         self.win.requestProperties(props)
 
+        # Creating modal frame in aspect2d for name/material input
         self.dialog = DirectFrame(
             frameSize=(-0.55, 0.55, -0.28, 0.28),
             frameColor=(0.08, 0.08, 0.08, 0.92),
@@ -759,6 +779,8 @@ class BoxAnnotator(Room):
 
         corners: NDArray[np.float64] = self._corners()
         key: str = name.lower().replace(" ", "_")
+
+        # Avoiding key overwrite by suffixing duplicates
         if key in self.annotations:
             i: int = 2
             candidate: str = f"{key}_{i}"
@@ -782,6 +804,8 @@ class BoxAnnotator(Room):
         if self.dialog is not None:
             self.dialog.destroy()
         self.dialog = None
+
+        # Clearing draft and moving to next color index for next object
         self._reset()
         self.color_idx += 1
 
