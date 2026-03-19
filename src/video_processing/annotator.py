@@ -145,14 +145,12 @@ class BoxAnnotator(Room):
         self.loader = cast(Any, self.loader)
         self.mouseWatcherNode = cast(Any, self.mouseWatcherNode)
 
-        # Set up Open3D raycasting for mesh intersections
-        mesh: o3d.geometry.TriangleMesh = o3d.io.read_triangle_mesh(OBJ_PATH)
-        mesh_t: o3d.t.geometry.TriangleMesh = o3d.t.geometry.TriangleMesh.from_legacy(
-            mesh
-        )
-        self.o3d_scene: o3d.t.geometry.RaycastingScene = (
-            o3d.t.geometry.RaycastingScene()
-        )
+        mesh = o3d.io.read_triangle_mesh(OBJ_PATH)
+        mesh.compute_vertex_normals()
+        self.triangles: NDArray[np.int32] = np.asarray(mesh.triangles, dtype=np.int32)
+        self.vertex_normals: NDArray[Any] = np.asarray(mesh.vertex_normals, dtype=np.float32)
+        mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
+        self.o3d_scene = o3d.t.geometry.RaycastingScene()
         self.o3d_scene.add_triangles(mesh_t)
 
         # Drawing the actual "+" crosshair
@@ -196,16 +194,16 @@ class BoxAnnotator(Room):
         self.ray_hit_marker.hide()
 
         # Making the box geometry states, which reset between annotations
-        self.anchor: NDArray[np.float64] | None = (
+        self.anchor: NDArray[Any] | None = (
             None  # The point that is clicked first on the mesh, acting as an anchor
         )
-        self.normal: NDArray[np.float64] | None = (
+        self.normal: NDArray[Any] | None = (
             None  # The vector that points perpendicular to a surface
         )
-        self.T1: NDArray[np.float64] | None = (
+        self.T1: NDArray[Any] | None = (
             None  # The vector tangent on the plane of the surface
         )
-        self.T2: NDArray[np.float64] | None = (
+        self.T2: NDArray[Any] | None = (
             None  # The vector perpendicular to T1 on the same plane
         )
         self.dx: float = 0.0  # Distance along T1 (width)
@@ -299,6 +297,9 @@ class BoxAnnotator(Room):
         If called in a drafting/editing state, it safely exits annotation mode,
         discarding in-progress geometry and returning to NAVIGATING.
         """
+        if self.dialog is not None:
+            return
+
         if self.state == AnnotatorState.NAVIGATING:
             self._clear_movement_keys()
             self._set_state(AnnotatorState.IDLE)
@@ -380,7 +381,9 @@ class BoxAnnotator(Room):
         Returns:
             PythonTask: task.cont to keep task running.
         """
-        if self.state != AnnotatorState.NAVIGATING or not self.mouse_locked:
+        if self.state == AnnotatorState.DIALOG:
+            return task.cont
+        if self.state == AnnotatorState.NAVIGATING and not self.mouse_locked:
             return task.cont
 
         dt: float = globalClock.getDt()
@@ -410,30 +413,30 @@ class BoxAnnotator(Room):
         self._update_raycast_visual()
 
         if self.state == AnnotatorState.DRAWING:
-            ray: tuple[NDArray[np.float64], NDArray[np.float64]] | None = (
+            ray: tuple[NDArray[Any], NDArray[Any]] | None = (
                 self._mouse_ray()
             )
             if ray:
-                origin: NDArray[np.float64]
-                direction: NDArray[np.float64]
+                origin: NDArray[Any]
+                direction: NDArray[Any]
                 origin, direction = ray
                 assert self.anchor is not None
                 assert self.normal is not None
                 assert self.T1 is not None
                 assert self.T2 is not None
-                hit: NDArray[np.float64] | None = self._plane_intersect(
+                hit: NDArray[Any] | None = self._plane_intersect(
                     origin, direction, self.anchor, self.normal
                 )
                 if hit is not None:
                     # Mapping hit point to tangent frame dimensions (dx, dy)
-                    diag: NDArray[np.float64] = hit - self.anchor
+                    diag: NDArray[Any] = hit - self.anchor
                     self.dx = float(np.dot(diag, self.T1))
                     self.dy = float(np.dot(diag, self.T2))
                     self.height = 0.0
                     self._rebuild_preview()
 
         elif self.state == AnnotatorState.HEIGHT:
-            ray: tuple[NDArray[np.float64], NDArray[np.float64]] | None = (
+            ray: tuple[NDArray[Any], NDArray[Any]] | None = (
                 self._mouse_ray()
             )
             if ray:
@@ -458,14 +461,14 @@ class BoxAnnotator(Room):
         if not self.show_rays:
             return
 
-        ray: tuple[NDArray[np.float64], NDArray[np.float64]] | None = (
+        ray: tuple[NDArray[Any], NDArray[Any]] | None = (
             self._interaction_ray()
         )
         if ray is None:
             return
 
-        origin: NDArray[np.float64]
-        direction: NDArray[np.float64]
+        origin: NDArray[Any]
+        direction: NDArray[Any]
         origin, direction = ray
 
         ray_t: o3d.core.Tensor = o3d.core.Tensor(
@@ -475,7 +478,7 @@ class BoxAnnotator(Room):
         t_hit: float = float(res["t_hit"].numpy()[0])
 
         hit_found: bool = not np.isinf(t_hit)
-        end_point: NDArray[np.float64]
+        end_point: NDArray[Any]
         if hit_found:
             end_point = origin + t_hit * direction
             self.ray_hit_marker.setPos(*end_point)
@@ -513,33 +516,35 @@ class BoxAnnotator(Room):
                     self.pick_queue.sortEntries()
                     hit_name: str = self.pick_queue.getEntry(0).getIntoNode().getName()
                     if hit_name.startswith("x_marker_"):
-                        self._delete_saved_box(hit_name[len("x_marker_"):])
+                        self._delete_saved_box(hit_name[len("x_marker_") :])
                         return
 
-            result: tuple[NDArray[np.float64], NDArray[np.float64]] | None = (
+            result: tuple[NDArray[Any], NDArray[Any]] | None = (
                 self._raycast_mouse()
             )
             if result is None:
                 return
-            hit: NDArray[np.float64]
-            normal: NDArray[np.float64]
+            hit: NDArray[Any]
+            normal: NDArray[Any]
             hit, normal = result
 
             # Ensuring normal faces towards camera direction
-            cam_origin: NDArray[np.float64]
+            cam_origin: NDArray[Any]
             cam_origin, _ = self._ray_obj_space()
             if np.dot(normal, cam_origin - hit) < 0:
                 normal = -normal
 
             # Building tangent frame from normal vector
-            up: NDArray[np.float64] = (
-                np.array([0.0, 0.0, 1.0], dtype=np.float64)
-                if abs(normal[2]) < 0.9
-                else np.array([0.0, 1.0, 0.0], dtype=np.float64)
+            # World Z-up is [0, 1, 0] in environ's OBJ space because environ has setP(90).
+            # Fallback for horizontal surfaces (floor/ceiling) uses world X = OBJ [1, 0, 0].
+            up: NDArray[Any] = (
+                np.array([0.0, 1.0, 0.0], dtype=np.float32)
+                if abs(normal[1]) < 0.9
+                else np.array([1.0, 0.0, 0.0], dtype=np.float32)
             )
-            T1: NDArray[np.float64] = np.cross(normal, up)
+            T1: NDArray[Any] = np.cross(normal, up)
             T1 /= np.linalg.norm(T1)
-            T2: NDArray[np.float64] = np.cross(T1, normal)
+            T2: NDArray[Any] = np.cross(T1, normal)
             T2 /= np.linalg.norm(T2)
 
             self.anchor = hit
@@ -603,7 +608,7 @@ class BoxAnnotator(Room):
 
     def _ray_obj_space(
         self, screen_pos: Point2 | None = None
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    ) -> tuple[NDArray[Any], NDArray[Any]]:
         """
         Raycasts in environment's local object space.
 
@@ -611,7 +616,7 @@ class BoxAnnotator(Room):
             screen_pos (Point2 | None): Normalized screen position. Defaults to center.
 
         Returns:
-            tuple[NDArray[np.float64], NDArray[np.float64]]: Ray origin and direction.
+            tuple[NDArray[Any], NDArray[Any]]: Ray origin and direction.
         """
         screen: Point2 = Point2(0, 0) if screen_pos is None else screen_pos
 
@@ -633,16 +638,16 @@ class BoxAnnotator(Room):
         d: Any = self.environ.getRelativeVector(self.camera, ray_d_cam)
         d.normalize()
 
-        origin: NDArray[np.float64] = np.array([o.x, o.y, o.z], dtype=np.float64)
-        direction: NDArray[np.float64] = np.array([d.x, d.y, d.z], dtype=np.float64)
+        origin: NDArray[Any] = np.array([o.x, o.y, o.z], dtype=np.float32)
+        direction: NDArray[Any] = np.array([d.x, d.y, d.z], dtype=np.float32)
         return origin, direction
 
-    def _mouse_ray(self) -> tuple[NDArray[np.float64], NDArray[np.float64]] | None:
+    def _mouse_ray(self) -> tuple[NDArray[Any], NDArray[Any]] | None:
         """
         Gets ray origin and direction from current mouse position.
 
         Returns:
-            tuple[NDArray[np.float64], NDArray[np.float64]] | None: Ray tuple if mouse is valid.
+            tuple[NDArray[Any], NDArray[Any]] | None: Ray tuple if mouse is valid.
         """
         if not self.mouseWatcherNode.hasMouse():
             return None
@@ -654,7 +659,7 @@ class BoxAnnotator(Room):
 
     def _interaction_ray(
         self,
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64]] | None:
+    ) -> tuple[NDArray[Any], NDArray[Any]] | None:
         """
         Gets ray for active interaction mode.
 
@@ -664,17 +669,34 @@ class BoxAnnotator(Room):
             return self._ray_obj_space(Point2(0, 0))
         return self._mouse_ray()
 
+    def _interpolate_normal(
+        self, res: dict[str, o3d.core.Tensor]
+    ) -> NDArray[Any]:
+        tri_idx: int = int(res["primitive_ids"].numpy()[0])
+        u: float
+        v: float
+        u, v = res["primitive_uvs"].numpy()[0]
+        w: float = 1.0 - u - v
+        tri: NDArray[np.int32] = self.triangles[tri_idx]
+        normal: NDArray[Any] = (
+            w * self.vertex_normals[tri[0]]
+            + u * self.vertex_normals[tri[1]]
+            + v * self.vertex_normals[tri[2]]
+        )
+        normal /= np.linalg.norm(normal)
+        return normal
+
     def _raycast_center(
         self,
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64]] | None:
+    ) -> tuple[NDArray[Any], NDArray[Any]] | None:
         """
         Casts ray from screen center and returns hit and normal.
 
         Returns:
-            tuple[NDArray[np.float64], NDArray[np.float64]] | None: Hit point and primitive normal.
+            tuple[NDArray[Any], NDArray[Any]] | None: Hit point and primitive normal.
         """
-        origin: NDArray[np.float64]
-        direction: NDArray[np.float64]
+        origin: NDArray[Any]
+        direction: NDArray[Any]
         origin, direction = self._ray_obj_space()
 
         ray: o3d.core.Tensor = o3d.core.Tensor(
@@ -687,27 +709,25 @@ class BoxAnnotator(Room):
         if np.isinf(t_hit):
             return None
 
-        hit: NDArray[np.float64] = origin + t_hit * direction
-        normal: NDArray[np.float64] = np.asarray(
-            res["primitive_normals"].numpy()[0], dtype=np.float64
-        )
+        hit: NDArray[Any] = origin + t_hit * direction
+        normal: NDArray[Any] = self._interpolate_normal(res)
         return hit, normal
 
     def _raycast_mouse(
         self,
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64]] | None:
+    ) -> tuple[NDArray[Any], NDArray[Any]] | None:
         """
         Casts ray from current mouse and returns hit and normal.
 
         Returns:
-            tuple[NDArray[np.float64], NDArray[np.float64]] | None: Hit point and primitive normal.
+            tuple[NDArray[Any], NDArray[Any]] | None: Hit point and primitive normal.
         """
-        ray: tuple[NDArray[np.float64], NDArray[np.float64]] | None = self._mouse_ray()
+        ray: tuple[NDArray[Any], NDArray[Any]] | None = self._mouse_ray()
         if ray is None:
             return None
 
-        origin: NDArray[np.float64]
-        direction: NDArray[np.float64]
+        origin: NDArray[Any]
+        direction: NDArray[Any]
         origin, direction = ray
 
         ray_t: o3d.core.Tensor = o3d.core.Tensor(
@@ -718,30 +738,28 @@ class BoxAnnotator(Room):
         if np.isinf(t_hit):
             return None
 
-        hit: NDArray[np.float64] = origin + t_hit * direction
-        normal: NDArray[np.float64] = np.asarray(
-            res["primitive_normals"].numpy()[0], dtype=np.float64
-        )
+        hit: NDArray[Any] = origin + t_hit * direction
+        normal: NDArray[Any] = self._interpolate_normal(res)
         return hit, normal
 
     def _plane_intersect(
         self,
-        ray_o: NDArray[np.float64],
-        ray_d: NDArray[np.float64],
-        plane_p: NDArray[np.float64],
-        plane_n: NDArray[np.float64],
-    ) -> NDArray[np.float64] | None:
+        ray_o: NDArray[Any],
+        ray_d: NDArray[Any],
+        plane_p: NDArray[Any],
+        plane_n: NDArray[Any],
+    ) -> NDArray[Any] | None:
         """
         Calculates ray-plane intersection point.
 
         Args:
-            ray_o (NDArray[np.float64]): Ray origin.
-            ray_d (NDArray[np.float64]): Ray direction.
-            plane_p (NDArray[np.float64]): Point on plane.
-            plane_n (NDArray[np.float64]): Plane normal.
+            ray_o (NDArray[Any]): Ray origin.
+            ray_d (NDArray[Any]): Ray direction.
+            plane_p (NDArray[Any]): Point on plane.
+            plane_n (NDArray[Any]): Plane normal.
 
         Returns:
-            NDArray[np.float64] | None: Intersection point if valid.
+            NDArray[Any] | None: Intersection point if valid.
         """
         denom: float = float(np.dot(ray_d, plane_n))
 
@@ -754,66 +772,66 @@ class BoxAnnotator(Room):
 
     def _height_from_ray(
         self,
-        ray_o: NDArray[np.float64],
-        ray_d: NDArray[np.float64],
+        ray_o: NDArray[Any],
+        ray_d: NDArray[Any],
     ) -> float:
         """
         Maps mouse ray to height value along current surface normal.
 
         Args:
-            ray_o (NDArray[np.float64]): Ray origin.
-            ray_d (NDArray[np.float64]): Ray direction.
+            ray_o (NDArray[Any]): Ray origin.
+            ray_d (NDArray[Any]): Ray direction.
 
         Returns:
             float: Height extrusion amount.
         """
-        base_center: NDArray[np.float64] = (
-            cast(NDArray[np.float64], self.anchor)
-            + 0.5 * self.dx * cast(NDArray[np.float64], self.T1)
-            + 0.5 * self.dy * cast(NDArray[np.float64], self.T2)
+        base_center: NDArray[Any] = (
+            cast(NDArray[Any], self.anchor)
+            + 0.5 * self.dx * cast(NDArray[Any], self.T1)
+            + 0.5 * self.dy * cast(NDArray[Any], self.T2)
         )
         _, cam_dir = self._ray_obj_space()
-        cam_right: NDArray[np.float64] = np.cross(
-            cam_dir, cast(NDArray[np.float64], self.normal)
+        cam_right: NDArray[Any] = np.cross(
+            cam_dir, cast(NDArray[Any], self.normal)
         )
         n: float = float(np.linalg.norm(cam_right))
         if n < 1e-6:
             return self.height
 
         cam_right /= n
-        hit: NDArray[np.float64] | None = self._plane_intersect(
+        hit: NDArray[Any] | None = self._plane_intersect(
             ray_o, ray_d, base_center, cam_right
         )
         if hit is None:
             return self.height
 
         # Projecting offset onto surface normal gives signed height value
-        return float(np.dot(hit - base_center, cast(NDArray[np.float64], self.normal)))
+        return float(np.dot(hit - base_center, cast(NDArray[Any], self.normal)))
 
     # --- box geometry ---
 
-    def _corners(self) -> NDArray[np.float64]:
+    def _corners(self) -> NDArray[Any]:
         """
         Computes all 8 box corners from current anchor, tangents, and height.
 
         Returns:
-            NDArray[np.float64]: Array of shape (8, 3) for bottom and top corners.
+            NDArray[Any]: Array of shape (8, 3) for bottom and top corners.
         """
-        bottom: NDArray[np.float64] = np.array(
+        bottom: NDArray[Any] = np.array(
             [
-                cast(NDArray[np.float64], self.anchor),
-                cast(NDArray[np.float64], self.anchor)
-                + self.dx * cast(NDArray[np.float64], self.T1),
-                cast(NDArray[np.float64], self.anchor)
-                + self.dx * cast(NDArray[np.float64], self.T1)
-                + self.dy * cast(NDArray[np.float64], self.T2),
-                cast(NDArray[np.float64], self.anchor)
-                + self.dy * cast(NDArray[np.float64], self.T2),
+                cast(NDArray[Any], self.anchor),
+                cast(NDArray[Any], self.anchor)
+                + self.dx * cast(NDArray[Any], self.T1),
+                cast(NDArray[Any], self.anchor)
+                + self.dx * cast(NDArray[Any], self.T1)
+                + self.dy * cast(NDArray[Any], self.T2),
+                cast(NDArray[Any], self.anchor)
+                + self.dy * cast(NDArray[Any], self.T2),
             ],
-            dtype=np.float64,
+            dtype=np.float32,
         )
-        top: NDArray[np.float64] = bottom + self.height * cast(
-            NDArray[np.float64], self.normal
+        top: NDArray[Any] = bottom + self.height * cast(
+            NDArray[Any], self.normal
         )
         return np.vstack([bottom, top])
 
@@ -822,7 +840,7 @@ class BoxAnnotator(Room):
         Clears and redraws the preview box (wireframe + transparent faces).
         """
         self.preview_node.node().removeAllChildren()
-        corners: NDArray[np.float64] = self._corners()
+        corners: NDArray[Any] = self._corners()
 
         r: float
         g: float
@@ -869,7 +887,7 @@ class BoxAnnotator(Room):
             h.removeNode()
         self.handle_nodes.clear()
 
-        corners: NDArray[np.float64] = self._corners()
+        corners: NDArray[Any] = self._corners()
         r: float
         g: float
         b: float
@@ -890,15 +908,15 @@ class BoxAnnotator(Room):
 
     def _drag_handle(
         self,
-        ray_o: NDArray[np.float64],
-        ray_d: NDArray[np.float64],
+        ray_o: NDArray[Any],
+        ray_d: NDArray[Any],
     ) -> None:
         """
         Updates box geometry while dragging a selected handle.
 
         Args:
-            ray_o (NDArray[np.float64]): Current ray origin.
-            ray_d (NDArray[np.float64]): Current ray direction.
+            ray_o (NDArray[Any]): Current ray origin.
+            ray_d (NDArray[Any]): Current ray direction.
         """
         assert self.dragging_handle is not None
         idx: int = self.dragging_handle
@@ -911,25 +929,25 @@ class BoxAnnotator(Room):
             assert self.normal is not None
             assert self.T1 is not None
             assert self.T2 is not None
-            bottom: list[NDArray[np.float64]] = [
+            bottom: list[NDArray[Any]] = [
                 self.anchor,
                 self.anchor + self.dx * self.T1,
                 self.anchor + self.dx * self.T1 + self.dy * self.T2,
                 self.anchor + self.dy * self.T2,
             ]
-            fixed: NDArray[np.float64] = bottom[OPPOSITE[idx]]
-            hit: NDArray[np.float64] | None = self._plane_intersect(
+            fixed: NDArray[Any] = bottom[OPPOSITE[idx]]
+            hit: NDArray[Any] | None = self._plane_intersect(
                 ray_o, ray_d, self.anchor, self.normal
             )
             if hit is None:
                 return
-            diag: NDArray[np.float64] = hit - fixed
+            diag: NDArray[Any] = hit - fixed
             self.anchor = fixed
             self.dx = float(np.dot(diag, self.T1))
             self.dy = float(np.dot(diag, self.T2))
 
         self._rebuild_preview()
-        corners: NDArray[np.float64] = self._corners()
+        corners: NDArray[Any] = self._corners()
         for i, h in enumerate(self.handle_nodes):
             h.setPos(*corners[i])
 
@@ -941,7 +959,7 @@ class BoxAnnotator(Room):
 
         Also places an X marker above the box for deletion.
         """
-        corners: NDArray[np.float64] = self._corners()
+        corners: NDArray[Any] = self._corners()
         r: float
         g: float
         b: float
@@ -983,12 +1001,12 @@ class BoxAnnotator(Room):
 
         self.saved_boxes[key] = box_np
 
-        top_center: NDArray[np.float64] = corners[4:].mean(axis=0)
+        top_center: NDArray[Any] = corners[4:].mean(axis=0)
         assert self.normal is not None
-        above: NDArray[np.float64] = top_center + 0.06 * self.normal
+        above: NDArray[Any] = top_center + 0.06 * self.normal
         self._spawn_x_marker(key, above)
 
-    def _spawn_x_marker(self, key: str, pos: NDArray[np.float64]) -> None:
+    def _spawn_x_marker(self, key: str, pos: NDArray[Any]) -> None:
         """
         Creates a clickable billboard X button above a saved box.
         """
@@ -1096,7 +1114,7 @@ class BoxAnnotator(Room):
         if not name:
             return
 
-        corners: NDArray[np.float64] = self._corners()
+        corners: NDArray[Any] = self._corners()
         key: str = name.lower().replace(" ", "_")
 
         # Avoiding key overwrite by suffixing duplicates
