@@ -9,6 +9,7 @@ google-genai
 openai
 torch
 transformers
+ollama
 
 # 3D/Graphics
 open3d
