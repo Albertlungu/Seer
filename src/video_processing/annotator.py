@@ -251,6 +251,15 @@ class BoxAnnotator(Room):
         """
         self.status_text.setText(f"{self.state.name}")
 
+    def _clear_movement_keys(self) -> None:
+        """
+        Clears WASD key state to prevent stuck movement across mode switches.
+        """
+        self.keys["w"] = False
+        self.keys["a"] = False
+        self.keys["s"] = False
+        self.keys["d"] = False
+
     def toggle_annotate(self) -> None:
         """
         Toggles between navigation and annotation modes.
@@ -259,6 +268,7 @@ class BoxAnnotator(Room):
         discarding in-progress geometry and returning to NAVIGATING.
         """
         if self.state == AnnotatorState.NAVIGATING:
+            self._clear_movement_keys()
             self._set_state(AnnotatorState.IDLE)
             self.mouse_locked = False
             props: WindowProperties = WindowProperties()
@@ -266,6 +276,7 @@ class BoxAnnotator(Room):
             self.win.requestProperties(props)
 
         elif self.state == AnnotatorState.IDLE:
+            self._clear_movement_keys()
             self._set_state(AnnotatorState.NAVIGATING)
             self.mouse_locked = True
             props: WindowProperties = WindowProperties()
@@ -276,6 +287,7 @@ class BoxAnnotator(Room):
             # Close dialog first so transitions stay valid
             self.cancel_dialog()
             self._reset()
+            self._clear_movement_keys()
             self._set_state(AnnotatorState.NAVIGATING)
             self.mouse_locked = True
             props: WindowProperties = WindowProperties()
@@ -285,6 +297,7 @@ class BoxAnnotator(Room):
         else:
             # DRAWING / HEIGHT / EDITING
             self._reset()
+            self._clear_movement_keys()
             self._set_state(AnnotatorState.NAVIGATING)
             self.mouse_locked = True
             props: WindowProperties = WindowProperties()
@@ -318,6 +331,7 @@ class BoxAnnotator(Room):
             AnnotatorState.EDITING,
         }:
             self._reset()
+            self._clear_movement_keys()
             self._set_state(AnnotatorState.NAVIGATING)
             self.mouse_locked = True
             props: WindowProperties = WindowProperties()
