@@ -208,9 +208,10 @@ class Room(ShowBase):
         self.move_speed = max(0.1, min(10, self.move_speed + delta))
 
 
-app = Room(
-    True,
-    aggregation_path=AGGREGATION_PATH,
-)
-app.show_bbox()
-app.run()
+if __name__ == "__main__":
+    app = Room(
+        True,
+        aggregation_path=AGGREGATION_PATH,
+    )
+    app.show_bbox()
+    app.run()
