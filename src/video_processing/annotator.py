@@ -22,6 +22,7 @@ from environment import Room
 from numpy.typing import NDArray
 from panda3d.core import (
     BitMask32,
+    CardMaker,
     CollisionHandlerQueue,
     CollisionNode,
     CollisionRay,
@@ -35,7 +36,6 @@ from panda3d.core import (
     GeomVertexWriter,
     LineSegs,
     Point2,
-    Point3,
     PythonTask,
     TextNode,
     TransparencyAttrib,
@@ -170,6 +170,8 @@ class BoxAnnotator(Room):
         self.state: AnnotatorState = AnnotatorState.NAVIGATING  # Default navigation
         self.color_idx: int = 0
         self.annotations: dict[str, dict[str, object]] = {}  # Will be saved to JSON
+        self.saved_boxes: dict[str, Any] = {}  # key → persistent scene node
+        self.saved_x_markers: dict[str, Any] = {}  # key → X button node
         self.dialog: DirectFrame | None = None
 
         # Status text in top-right corner (shows current state)
@@ -183,6 +185,15 @@ class BoxAnnotator(Room):
             mayChange=True,
         )
         self._update_status_text()
+
+        # Ray debug visuals so user can see cast direction and hit point
+        self.show_rays: bool = True
+        self.ray_debug_node = self.environ.attachNewNode("ray_debug")
+        self.ray_hit_marker = self.loader.loadModel("models/misc/sphere")
+        self.ray_hit_marker.setScale(0.015)
+        self.ray_hit_marker.setColor(0.1, 1.0, 0.1, 1.0)
+        self.ray_hit_marker.reparentTo(self.environ)
+        self.ray_hit_marker.hide()
 
         # Making the box geometry states, which reset between annotations
         self.anchor: NDArray[np.float64] | None = (
@@ -210,7 +221,7 @@ class BoxAnnotator(Room):
         pick_cn: CollisionNode = CollisionNode("picker_ray")
         self.pick_np = self.camera.attachNewNode(pick_cn)
 
-        pick_cn.setFromCollideMask(BitMask32.bit(1))
+        pick_cn.setFromCollideMask(BitMask32.bit(1) | BitMask32.bit(2))
         self.pick_ray: CollisionRay = CollisionRay()
         pick_cn.addSolid(self.pick_ray)
         self.picker.addCollider(self.pick_np, self.pick_queue)
@@ -225,6 +236,7 @@ class BoxAnnotator(Room):
         self.accept("space", self.on_space)
         self.accept("tab", self.on_tab)
         self.accept("control-s", self.save)
+        self.accept("r", self.toggle_raycast_visual)
 
     def _set_state(self, new_state: AnnotatorState) -> None:
         """
@@ -260,6 +272,26 @@ class BoxAnnotator(Room):
         self.keys["s"] = False
         self.keys["d"] = False
 
+    def _center_mouse_pointer(self) -> None:
+        """
+        Recenters OS pointer in the window for consistent center-ray behaviour.
+        """
+        width: int = self.win.getXSize()
+        height: int = self.win.getYSize()
+        if width <= 0 or height <= 0:
+            return
+
+        self.win.movePointer(0, width // 2, height // 2)
+
+    def toggle_raycast_visual(self) -> None:
+        """
+        Toggles raycast visualization on and off.
+        """
+        self.show_rays = not self.show_rays
+        if not self.show_rays:
+            self.ray_debug_node.node().removeAllChildren()
+            self.ray_hit_marker.hide()
+
     def toggle_annotate(self) -> None:
         """
         Toggles between navigation and annotation modes.
@@ -282,17 +314,11 @@ class BoxAnnotator(Room):
             props: WindowProperties = WindowProperties()
             props.setCursorHidden(True)
             self.win.requestProperties(props)
+            self._center_mouse_pointer()
 
         elif self.state == AnnotatorState.DIALOG:
-            # Close dialog first so transitions stay valid
+            # Close dialog without discarding the in-progress box, same as Cancel
             self.cancel_dialog()
-            self._reset()
-            self._clear_movement_keys()
-            self._set_state(AnnotatorState.NAVIGATING)
-            self.mouse_locked = True
-            props: WindowProperties = WindowProperties()
-            props.setCursorHidden(True)
-            self.win.requestProperties(props)
 
         else:
             # DRAWING / HEIGHT / EDITING
@@ -303,6 +329,7 @@ class BoxAnnotator(Room):
             props: WindowProperties = WindowProperties()
             props.setCursorHidden(True)
             self.win.requestProperties(props)
+            self._center_mouse_pointer()
 
     def toggle_mouse_lock(self) -> None:
         """
@@ -317,6 +344,8 @@ class BoxAnnotator(Room):
             props: WindowProperties = WindowProperties()
             props.setCursorHidden(self.mouse_locked)
             self.win.requestProperties(props)
+            if self.mouse_locked:
+                self._center_mouse_pointer()
             return
 
         if self.state == AnnotatorState.DIALOG:
@@ -337,6 +366,7 @@ class BoxAnnotator(Room):
             props: WindowProperties = WindowProperties()
             props.setCursorHidden(True)
             self.win.requestProperties(props)
+            self._center_mouse_pointer()
 
     def move(self, task: PythonTask) -> PythonTask:
         """
@@ -377,6 +407,8 @@ class BoxAnnotator(Room):
         Returns:
             Task: task.cont to keep task running.
         """
+        self._update_raycast_visual()
+
         if self.state == AnnotatorState.DRAWING:
             ray: tuple[NDArray[np.float64], NDArray[np.float64]] | None = (
                 self._mouse_ray()
@@ -416,6 +448,54 @@ class BoxAnnotator(Room):
 
         return task.cont
 
+    def _update_raycast_visual(self) -> None:
+        """
+        Draws current interaction ray and hit location in the scene.
+
+        Green line means mesh hit.
+        Red line means no hit.
+        """
+        if not self.show_rays:
+            return
+
+        ray: tuple[NDArray[np.float64], NDArray[np.float64]] | None = (
+            self._interaction_ray()
+        )
+        if ray is None:
+            return
+
+        origin: NDArray[np.float64]
+        direction: NDArray[np.float64]
+        origin, direction = ray
+
+        ray_t: o3d.core.Tensor = o3d.core.Tensor(
+            [[*origin, *direction]], dtype=o3d.core.float32
+        )
+        res: dict[str, o3d.core.Tensor] = self.o3d_scene.cast_rays(ray_t)
+        t_hit: float = float(res["t_hit"].numpy()[0])
+
+        hit_found: bool = not np.isinf(t_hit)
+        end_point: NDArray[np.float64]
+        if hit_found:
+            end_point = origin + t_hit * direction
+            self.ray_hit_marker.setPos(*end_point)
+            self.ray_hit_marker.show()
+        else:
+            end_point = origin + 2.0 * direction
+            self.ray_hit_marker.hide()
+
+        self.ray_debug_node.node().removeAllChildren()
+
+        ls: LineSegs = LineSegs()
+        if hit_found:
+            ls.setColor(0.1, 1.0, 0.1, 1.0)
+        else:
+            ls.setColor(1.0, 0.2, 0.2, 1.0)
+        ls.setThickness(2.5)
+        ls.moveTo(*origin)
+        ls.drawTo(*end_point)
+        self.ray_debug_node.attachNewNode(ls.create())
+
     # --- input handlers ---
 
     def on_click(self) -> None:
@@ -423,6 +503,19 @@ class BoxAnnotator(Room):
         Handles mouse click events for all annotation states.
         """
         if self.state == AnnotatorState.IDLE:
+            # Check for X marker click before placing a new anchor
+            if self.mouseWatcherNode.hasMouse():
+                mx: float = self.mouseWatcherNode.getMouseX()
+                my: float = self.mouseWatcherNode.getMouseY()
+                self.pick_ray.setFromLens(self.camNode, Point2(mx, my))
+                self.picker.traverse(self.environ)
+                if self.pick_queue.getNumEntries() > 0:
+                    self.pick_queue.sortEntries()
+                    hit_name: str = self.pick_queue.getEntry(0).getIntoNode().getName()
+                    if hit_name.startswith("x_marker_"):
+                        self._delete_saved_box(hit_name[len("x_marker_"):])
+                        return
+
             result: tuple[NDArray[np.float64], NDArray[np.float64]] | None = (
                 self._raycast_mouse()
             )
@@ -520,19 +613,24 @@ class BoxAnnotator(Room):
         Returns:
             tuple[NDArray[np.float64], NDArray[np.float64]]: Ray origin and direction.
         """
-        if screen_pos is None:
-            screen_pos = Point2(0, 0)
+        screen: Point2 = Point2(0, 0) if screen_pos is None else screen_pos
 
-        near: Point3 = Point3()
-        far: Point3 = Point3()
+        sx: float = float(screen.getX())
+        sy: float = float(screen.getY())
 
-        # Converting 2D screen point -> 3D ray in camera space
-        self.camLens.extrude(screen_pos, near, far)
-        near_w: Any = self.render.getRelativePoint(self.camera, near)
-        far_w: Any = self.render.getRelativePoint(self.camera, far)
-        o: Any = self.render.getRelativePoint(self.environ, near_w)
-        f: Any = self.render.getRelativePoint(self.environ, far_w)
-        d: Any = f - o
+        # Use Panda's own lens ray construction to match camera controls exactly.
+        picker_ray: CollisionRay = CollisionRay()
+        picker_ray.setFromLens(self.camNode, sx, sy)
+
+        ray_o_cam: Any = picker_ray.getOrigin()
+        ray_d_cam: Any = picker_ray.getDirection()
+
+        # Convert directly from camera space into environ's local (OBJ) space.
+        # environ has setP(90) and setPos(-mid) as world transforms; its local space
+        # matches the raw OBJ coordinate system that Open3D loaded — so this
+        # conversion gives a ray that aligns with the Open3D raycasting scene.
+        o: Any = self.environ.getRelativePoint(self.camera, ray_o_cam)
+        d: Any = self.environ.getRelativeVector(self.camera, ray_d_cam)
         d.normalize()
 
         origin: NDArray[np.float64] = np.array([o.x, o.y, o.z], dtype=np.float64)
@@ -553,6 +651,18 @@ class BoxAnnotator(Room):
         mx: float = self.mouseWatcherNode.getMouseX()
         my: float = self.mouseWatcherNode.getMouseY()
         return self._ray_obj_space(Point2(mx, my))
+
+    def _interaction_ray(
+        self,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]] | None:
+        """
+        Gets ray for active interaction mode.
+
+        In mouse-lock mode this always uses screen center.
+        """
+        if self.mouse_locked:
+            return self._ray_obj_space(Point2(0, 0))
+        return self._mouse_ray()
 
     def _raycast_center(
         self,
@@ -764,18 +874,19 @@ class BoxAnnotator(Room):
         g: float
         b: float
         r, g, b = COLOURS[self.color_idx % len(COLOURS)]
+        s: float = 0.025  # half-size in world units
         for i, corner in enumerate(corners):
-            sphere: Any = self.loader.loadModel("models/misc/sphere")
-            sphere.setScale(0.025)
-            sphere.setColor(r, g, b, 1)
-            sphere.setPos(*corner)
+            cm: CardMaker = CardMaker(f"handle_{i}_card")
+            cm.setFrame(-s, s, -s, s)
+            handle_np: Any = self.environ.attachNewNode(cm.generate())
+            handle_np.setPos(*corner)
+            handle_np.setColor(r, g, b, 1)
+            handle_np.setBillboardPointEye()
             cn: CollisionNode = CollisionNode(f"handle_{i}")
-            # Radius 1.0 is local to model scale (sphere node is already scaled down)
-            cn.addSolid(CollisionSphere(0, 0, 0, 1.0))
+            cn.addSolid(CollisionSphere(0, 0, 0, s))
             cn.setIntoCollideMask(BitMask32.bit(1))
-            sphere.attachNewNode(cn)
-            sphere.reparentTo(self.environ)
-            self.handle_nodes.append(sphere)
+            handle_np.attachNewNode(cn)
+            self.handle_nodes.append(handle_np)
 
     def _drag_handle(
         self,
@@ -821,6 +932,95 @@ class BoxAnnotator(Room):
         corners: NDArray[np.float64] = self._corners()
         for i, h in enumerate(self.handle_nodes):
             h.setPos(*corners[i])
+
+    # --- saved box management ---
+
+    def _spawn_saved_box(self, key: str) -> None:
+        """
+        Creates a persistent wireframe + face visual for a confirmed annotation.
+
+        Also places an X marker above the box for deletion.
+        """
+        corners: NDArray[np.float64] = self._corners()
+        r: float
+        g: float
+        b: float
+        r, g, b = COLOURS[self.color_idx % len(COLOURS)]
+
+        box_np: Any = self.environ.attachNewNode(f"saved_box_{key}")
+
+        ls: LineSegs = LineSegs()
+        ls.setColor(r, g, b, 1)
+        ls.setThickness(2)
+        for a, b_idx in BOX_EDGES:
+            ls.moveTo(*corners[a])
+            ls.drawTo(*corners[b_idx])
+        box_np.attachNewNode(ls.create())
+
+        fmt: GeomVertexFormat = GeomVertexFormat.getV3c4()
+        vdata: GeomVertexData = GeomVertexData("sf", fmt, Geom.UHStatic)
+        vw: GeomVertexWriter = GeomVertexWriter(vdata, "vertex")
+        cw: GeomVertexWriter = GeomVertexWriter(vdata, "color")
+        for face in FACE_INDICES:
+            for idx in face:
+                vw.addData3(*corners[idx])
+                cw.addData4(r, g, b, 0.10)
+
+        tris: GeomTriangles = GeomTriangles(Geom.UHStatic)
+        for i in range(len(FACE_INDICES)):
+            base: int = i * 4
+            tris.addVertices(base, base + 1, base + 2)
+            tris.addVertices(base, base + 2, base + 3)
+
+        geom: Geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        gn: GeomNode = GeomNode("saved_faces")
+        gn.addGeom(geom)
+        face_np: Any = box_np.attachNewNode(gn)
+        face_np.setTransparency(TransparencyAttrib.MAlpha)
+        face_np.setTwoSided(True)
+        face_np.setDepthWrite(False)
+
+        self.saved_boxes[key] = box_np
+
+        top_center: NDArray[np.float64] = corners[4:].mean(axis=0)
+        assert self.normal is not None
+        above: NDArray[np.float64] = top_center + 0.06 * self.normal
+        self._spawn_x_marker(key, above)
+
+    def _spawn_x_marker(self, key: str, pos: NDArray[np.float64]) -> None:
+        """
+        Creates a clickable billboard X button above a saved box.
+        """
+        x_np: Any = self.environ.attachNewNode(f"x_root_{key}")
+        x_np.setPos(*pos)
+        x_np.setBillboardPointEye()
+
+        tn: TextNode = TextNode(f"x_text_{key}")
+        tn.setText("x")
+        tn.setAlign(TextNode.ACenter)
+        tn.setTextColor(1, 1, 1, 1)
+        tn.setCardColor(0.75, 0.1, 0.1, 0.95)
+        tn.setCardAsMargin(0.2, 0.2, 0.1, 0.1)
+        text_np: Any = x_np.attachNewNode(tn)
+        text_np.setScale(0.04)
+
+        cn: CollisionNode = CollisionNode(f"x_marker_{key}")
+        cn.addSolid(CollisionSphere(0, 0, 0, 0.05))
+        cn.setIntoCollideMask(BitMask32.bit(2))
+        x_np.attachNewNode(cn)
+
+        self.saved_x_markers[key] = x_np
+
+    def _delete_saved_box(self, key: str) -> None:
+        """
+        Removes a saved box and its X marker from the scene and annotations dict.
+        """
+        if key in self.saved_boxes:
+            self.saved_boxes.pop(key).removeNode()
+        if key in self.saved_x_markers:
+            self.saved_x_markers.pop(key).removeNode()
+        self.annotations.pop(key, None)
 
     # --- dialog ---
 
@@ -924,7 +1124,8 @@ class BoxAnnotator(Room):
             self.dialog.destroy()
         self.dialog = None
 
-        # Clearing draft and moving to next color index for next object
+        # Promote draft geometry to a persistent saved box before clearing state
+        self._spawn_saved_box(key)
         self._reset()
         self.color_idx += 1
 
