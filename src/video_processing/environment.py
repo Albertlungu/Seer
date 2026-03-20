@@ -4,6 +4,9 @@
 Creates the 3D environment in which the user can move around.
 """
 
+# pyright: reportAttributeAccessIssue=none
+# pyright: reportOptionalMemberAccess=none
+
 import json
 
 from direct.showbase.ShowBase import ShowBase
@@ -24,7 +27,8 @@ class Room(ShowBase):
         if aggregation_path:
             with open(aggregation_path, "rb") as f:
                 self.aggregations = json.load(f)
-
+        if not self.loader:
+            raise ValueError("Error; loader DNE")
         self.environ = self.loader.loadModel(
             "/Users/albertlungu/Local/GitHub/Seer/data/reconstructions/obj/albert_room.obj"
         )  # Loads the 3D model
