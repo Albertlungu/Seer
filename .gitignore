@@ -211,9 +211,11 @@ __marimo__/
 private
 
 # Large binary reconstruction outputs - keep off git, store separately
-data/*/
-*.usdz
+data/env_imgs
+data/env_vids
+data/reconstructions/usdz
+data/vision_json/legacy
+
 *.mov
-*.obj
 .vscode
 .claude
