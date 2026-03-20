@@ -3,11 +3,14 @@
 
 Takes the annotations.json file, reads the materials for each object, installs a local Ollama model,
 adds the molecular composition for each material to the same json, then removes the Ollama model.
+
+Uses the molecule names in the aggregated JSON file to lookup SMILES.
 """
 
 import json
 
 import ollama
+import requests
 
 FOLDER_PATH = "data/vision_json/"
 MODEL = "qwen2.5:7b"
@@ -19,35 +22,40 @@ compounds that make up those materials and return their chemical formulas.
 Rules:
 - Output ONLY a JSON object in exactly the format shown below. No explanation, no backticks,
   no extra keys, no wrapping object.
-- Keys are molecule or compound names (e.g. "cellulose", "polypropylene"), not material names.
-- Values are plain molecular formulas (e.g. "C6H10O5", "C3H6").
-- For polymers, give the repeat unit formula only. Never append n, (n), or subscript notation.
+- Keys are the names of specific small molecules or discrete compounds that are queryable in
+  PubChem by name. For polymers, use the repeat unit or monomer name, not the polymer name.
+  Examples: use "cellobiose" not "cellulose", use "coniferyl-alcohol" not "lignin",
+  use "propylene" not "polypropylene", use "ethylene" not "polyethylene",
+  use "glycyl-prolyl-hydroxyproline" not "collagen".
+- Each compound key maps to a dict with a single key "formula" whose value is the plain molecular
+  formula. Never append n, (n), or subscript notation.
+- Keys must NOT be material names (e.g. "wood", "paper", "metal", "leather", "plastic").
 - If a material is ambiguous (e.g. "plastic", "metal"), infer the most common specific compound
   for that object type and use that.
 - If a material has multiple distinct compounds, list each one as a separate key.
 - Do not include duplicate formulas under different keys.
 
-Incorrect output (material names as keys, duplicate formulas):
+Incorrect output (polymer names and material names as keys, flat string values):
 {
     "composition": {
-        "paper": "C6H10O5",
+        "cellulose": "C6H10O5",
         "wood": "C6H10O5"
     }
 }
 
-Correct output (compound names as keys, no duplicates):
+Correct output (PubChem-queryable small molecule names as keys, dict values):
 {
     "composition": {
-        "cellulose": "C6H10O5",
-        "lignin": "C9H10O2"
+        "cellobiose": {"formula": "C12H22O11"},
+        "coniferyl-alcohol": {"formula": "C10H12O3"}
     }
 }
 
 Output format (and nothing else):
 {
     "composition": {
-        "compound_name": "formula",
-        "compound_name": "formula"
+        "compound_name": {"formula": "formula"},
+        "compound_name": {"formula": "formula"}
     }
 }
 
@@ -68,7 +76,7 @@ def load_annotations() -> dict:
     return annotations
 
 
-def use_ollama(object_details: str) -> dict:
+def run_ollama(object_details: str) -> dict:
     """
     Runs the ollama model given the details of some object inside the annotations JSON.
 
@@ -78,9 +86,7 @@ def use_ollama(object_details: str) -> dict:
     Returns:
         dict: The JSON output from Ollama, being only the composition.
     """
-    print(f"Pulling {MODEL} from ollama")
-    ollama.pull(MODEL)
-    print("Generating responses...")
+    print("Generating response...")
     response = ollama.generate(
         model=MODEL,
         prompt=COMPOSITION_PROMPT + str(object_details),
@@ -90,12 +96,26 @@ def use_ollama(object_details: str) -> dict:
     return json.loads(response.response)
 
 
+def build_smiles(composition: dict[str, dict[str, str]]):
+    for molec_name, molec_details in composition.items():
+        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{molec_name}/property/IsomericSMILES/JSON"
+        response = requests.get(url)
+        data = response.json()
+        try:
+            smiles = data["PropertyTable"]["Properties"][0]["SMILES"]
+        except KeyError as e:
+            print(f"Key error: {e}")
+
+        molec_details["smiles"] = smiles
+
+
 def aggregate_compositions():
     annotations = load_annotations()
     for obj_name, obj_details in annotations.items():
-        response = use_ollama(object_details=obj_details)
+        response = run_ollama(object_details=obj_details)
         print(response)
         annotations[obj_name]["composition"] = response["composition"]
+        build_smiles(response["composition"])
 
     return annotations
 
@@ -107,5 +127,9 @@ def save_to_json(final_annotations: dict) -> None:
         json.dump(final_annotations, f, indent=2)
 
 
-aggregated = aggregate_compositions()
-save_to_json(aggregated)
+def main():
+    print(f"Pulling {MODEL} from ollama")
+    ollama.pull(MODEL)
+
+    aggregated = aggregate_compositions()
+    save_to_json(aggregated)

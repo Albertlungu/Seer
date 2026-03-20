@@ -3,6 +3,7 @@ pillow
 colorama
 python-dotenv
 numpy
+requests
 
 # AI/ML APIs
 google-genai
