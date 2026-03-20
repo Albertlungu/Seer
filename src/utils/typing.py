@@ -4,6 +4,7 @@
 Contains all type annotations used throughout code for DRY principle.
 """
 
+import torch
 from typing import TypedDict
 
 # ======= Annotations/Aggregations =======

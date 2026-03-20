@@ -15,6 +15,7 @@ ollama
 # 3D/Graphics
 open3d
 panda3d
+rdkit
 
 # SfM/Photogrammetry
 pycolmap
