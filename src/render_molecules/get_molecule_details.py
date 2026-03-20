@@ -5,34 +5,59 @@ Uses rdkit to get coordinates, bond list, and other details of a molecule's 3D s
 SMILES strings.
 """
 
+import json
+
 from rdkit import Chem
 from rdkit.Chem import AllChem
-import json
-from typing import TypedDict
+
+from src.utils.type_annotations import Aggregations, AtomDetails, BondDetails, SimDetails
 
 FOLDER_PATH = "data/vision_json/"
 
 
-class AggregatedObjectDetails(TypedDict):
-    name: str
-    materials: list[str]
-    corners: dict[str, list[list[float]]]
-    base_normal: list[float]
-    composition: dict[str, dict]
-
-Aggregations = dict[str, AggregatedObjectDetails]
-
-
-def load_aggregations() -> dict:
+def load_aggregations() -> Aggregations:
     """
     Loads the aggregations.
 
     Returns:
-        dict: The string containing the full JSON of the aggregations.
+        Aggregations: The aggregated data keyed by object name.
     """
-    with open(FOLDER_PATH + "aggregations.json", "rb") as f:
-        aggregations: dict = json.load(f)
+    with open(FOLDER_PATH + "aggregated.json", "rb") as f:
+        aggregations: Aggregations = json.load(f)
     return aggregations
 
-def build_details(aggregations: Aggregations):
 
+def get_details(smiles: str) -> SimDetails:
+    molecule = Chem.MolFromSmiles(smiles)
+    molecule = Chem.AddHs(molecule)
+    AllChem.EmbedMolecule(molecule)  # type: ignore[attr-defined]
+
+    conf = molecule.GetConformer()
+
+    atoms: list[AtomDetails] = [
+        {
+            "idx": atom.GetIdx(),
+            "symbol": atom.GetSymbol(),
+            "position": list(conf.GetAtomPosition(atom.GetIdx())),
+        }
+        for atom in molecule.GetAtoms()
+    ]
+
+    bonds: list[BondDetails] = [
+        {
+            "begin": bond.GetBeginAtomIdx(),
+            "end": bond.GetEndAtomIdx(),
+            "type": bond.GetBondTypeAsDouble(),
+        }
+        for bond in molecule.GetBonds()
+    ]
+
+    return {"atoms": atoms, "bonds": bonds}
+
+
+def build_details(aggregations: Aggregations) -> None:
+    for obj_details in aggregations.values():
+        composition = obj_details.get("composition", {})
+        for molec_details in composition.values():
+            smiles = molec_details["smiles"]
+            molec_details["sim_details"] = get_details(smiles)

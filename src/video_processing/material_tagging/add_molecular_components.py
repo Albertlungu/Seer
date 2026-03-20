@@ -8,27 +8,15 @@ Uses the molecule names in the aggregated JSON file to lookup SMILES.
 """
 
 import json
-from typing import TypedDict
 
 import ollama
 import requests
 
-
-class AnnotatedObjectDetails(TypedDict):
-    name: str
-    materials: list[str]
-    corners: dict[str, list[list[float]]]
-    base_normal: list[float]
-
-
-Annotations = dict[str, AnnotatedObjectDetails]
-
-
-class AggregatedObjectDetails(AnnotatedObjectDetails, total=False):
-    composition: dict[str, dict]
-
-
-Aggregations = dict[str, AggregatedObjectDetails]
+from src.utils.type_annotations import (
+    AnnotatedObjectDetails,
+    Annotations,
+    Aggregations,
+)
 
 FOLDER_PATH = "data/vision_json/"
 MODEL = "qwen2.5:7b"
