@@ -1,6 +1,8 @@
 """
 ./src/video_processing/environment.py
 
+python -m src.video_processing.environment
+
 Creates the 3D environment in which the user can move around.
 """
 

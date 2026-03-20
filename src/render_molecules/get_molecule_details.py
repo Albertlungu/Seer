@@ -1,6 +1,8 @@
 """
 ./src/render_molecules/get_molecule_details.py
 
+python -m src.render_molecules.get_molecule_details
+
 Uses rdkit to get coordinates, bond list, and other details of a molecule's 3D structure from
 SMILES strings.
 """

@@ -1,6 +1,8 @@
 """
 ./src/video_processing/reconstruction/run_swift_scan.py
 
+python -m src.video_processing.reconstruction.run_swift_scan
+
 Uses native Swift commands to create the 3D model from the video using Photogrammetry.
 """
 

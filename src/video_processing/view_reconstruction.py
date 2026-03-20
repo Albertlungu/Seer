@@ -1,6 +1,8 @@
 """
 ./src/video_processing/view_reconstruction.py
 
+python -m src.video_processing.view_reconstruction
+
 Convert usdz to obj and view it in open3d.
 """
 

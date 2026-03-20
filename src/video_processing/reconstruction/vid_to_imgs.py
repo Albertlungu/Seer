@@ -1,6 +1,8 @@
 """
 ./src/video_processing/reconstruction/vid_to_imgs.py
 
+python -m src.video_processing.reconstruction.vid_to_imgs
+
 Turns a video into a folder of images.
 """
 
