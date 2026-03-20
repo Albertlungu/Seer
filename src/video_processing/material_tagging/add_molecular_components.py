@@ -1,5 +1,7 @@
 """
-./src/video_processing/material_tagging/ai/add_molecular_components.py
+./src/video_processing/material_tagging/add_molecular_components.py
+
+python -m src.video_processing.material_tagging.add_molecular_components
 
 Takes the annotations.json file, reads the materials for each object, installs a local Ollama model,
 adds the molecular composition for each material to the same json, then removes the Ollama model.
@@ -13,13 +15,14 @@ import ollama
 import requests
 
 from src.utils.type_annotations import (
+    Aggregations,
     AnnotatedObjectDetails,
     Annotations,
-    Aggregations,
 )
 
 FOLDER_PATH = "data/vision_json/"
 MODEL = "qwen2.5:7b"
+DELETE_MODEL = False
 COMPOSITION_PROMPT = """
 You are an expert chemical engineer. You will receive a JSON object describing a single item in a
 scene, including its material composition. Your task is to identify the specific molecules or
@@ -82,9 +85,7 @@ def load_annotations() -> Annotations:
     return annotations
 
 
-def run_ollama(
-    object_details: AnnotatedObjectDetails, delete_model: bool = False
-) -> dict:
+def run_ollama(object_details: AnnotatedObjectDetails) -> dict:
     """
     Runs the ollama model given the details of some object inside the annotations JSON.
 
@@ -100,9 +101,6 @@ def run_ollama(
         prompt=COMPOSITION_PROMPT + str(object_details),
         format="json",
     )  # format=json makes valid json output
-
-    if delete_model:
-        ollama.delete(MODEL)
 
     return json.loads(response.response)
 
@@ -125,11 +123,11 @@ def build_smiles(composition: dict[str, dict[str, str]]) -> None:
             print(f"Key error: {e}")
 
 
-def aggregate_compositions() -> Aggregations:
+def aggregate_compositions(delete_model: bool = False) -> Aggregations:
     annotations = load_annotations()
     aggregations: Aggregations = {}
     for obj_name, obj_details in annotations.items():
-        response = run_ollama(object_details=obj_details, delete_model=True)
+        response = run_ollama(object_details=obj_details)
         print(response)
         composition = response["composition"]
         build_smiles(composition)
@@ -154,3 +152,10 @@ def main():
 
     aggregated = aggregate_compositions()
     save_to_json(aggregated)
+
+    if DELETE_MODEL:
+        ollama.delete(MODEL)
+
+
+if __name__ == "__main__":
+    main()
