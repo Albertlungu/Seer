@@ -1,6 +1,8 @@
 """
 ./src/video_processing/annotator.py
 
+python -m src.video_processing.annotator
+
 This is a manual annotator where the user makes 3D objects themselves as bounding boxes.
 Press E to enter annotation mode, click anchor, drag base, height, resize with handles, press
 space to name and save.
@@ -148,7 +150,9 @@ class BoxAnnotator(Room):
         mesh = o3d.io.read_triangle_mesh(OBJ_PATH)
         mesh.compute_vertex_normals()
         self.triangles: NDArray[np.int32] = np.asarray(mesh.triangles, dtype=np.int32)
-        self.vertex_normals: NDArray[Any] = np.asarray(mesh.vertex_normals, dtype=np.float32)
+        self.vertex_normals: NDArray[Any] = np.asarray(
+            mesh.vertex_normals, dtype=np.float32
+        )
         mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
         self.o3d_scene = o3d.t.geometry.RaycastingScene()
         self.o3d_scene.add_triangles(mesh_t)
@@ -413,9 +417,7 @@ class BoxAnnotator(Room):
         self._update_raycast_visual()
 
         if self.state == AnnotatorState.DRAWING:
-            ray: tuple[NDArray[Any], NDArray[Any]] | None = (
-                self._mouse_ray()
-            )
+            ray: tuple[NDArray[Any], NDArray[Any]] | None = self._mouse_ray()
             if ray:
                 origin: NDArray[Any]
                 direction: NDArray[Any]
@@ -436,9 +438,7 @@ class BoxAnnotator(Room):
                     self._rebuild_preview()
 
         elif self.state == AnnotatorState.HEIGHT:
-            ray: tuple[NDArray[Any], NDArray[Any]] | None = (
-                self._mouse_ray()
-            )
+            ray: tuple[NDArray[Any], NDArray[Any]] | None = self._mouse_ray()
             if ray:
                 # Height is clamped to avoid zero-height faces
                 self.height = max(0.001, self._height_from_ray(*ray))
@@ -461,9 +461,7 @@ class BoxAnnotator(Room):
         if not self.show_rays:
             return
 
-        ray: tuple[NDArray[Any], NDArray[Any]] | None = (
-            self._interaction_ray()
-        )
+        ray: tuple[NDArray[Any], NDArray[Any]] | None = self._interaction_ray()
         if ray is None:
             return
 
@@ -519,9 +517,7 @@ class BoxAnnotator(Room):
                         self._delete_saved_box(hit_name[len("x_marker_") :])
                         return
 
-            result: tuple[NDArray[Any], NDArray[Any]] | None = (
-                self._raycast_mouse()
-            )
+            result: tuple[NDArray[Any], NDArray[Any]] | None = self._raycast_mouse()
             if result is None:
                 return
             hit: NDArray[Any]
@@ -669,9 +665,7 @@ class BoxAnnotator(Room):
             return self._ray_obj_space(Point2(0, 0))
         return self._mouse_ray()
 
-    def _interpolate_normal(
-        self, res: dict[str, o3d.core.Tensor]
-    ) -> NDArray[Any]:
+    def _interpolate_normal(self, res: dict[str, o3d.core.Tensor]) -> NDArray[Any]:
         tri_idx: int = int(res["primitive_ids"].numpy()[0])
         u: float
         v: float
@@ -791,9 +785,7 @@ class BoxAnnotator(Room):
             + 0.5 * self.dy * cast(NDArray[Any], self.T2)
         )
         _, cam_dir = self._ray_obj_space()
-        cam_right: NDArray[Any] = np.cross(
-            cam_dir, cast(NDArray[Any], self.normal)
-        )
+        cam_right: NDArray[Any] = np.cross(cam_dir, cast(NDArray[Any], self.normal))
         n: float = float(np.linalg.norm(cam_right))
         if n < 1e-6:
             return self.height
@@ -820,19 +812,15 @@ class BoxAnnotator(Room):
         bottom: NDArray[Any] = np.array(
             [
                 cast(NDArray[Any], self.anchor),
-                cast(NDArray[Any], self.anchor)
-                + self.dx * cast(NDArray[Any], self.T1),
+                cast(NDArray[Any], self.anchor) + self.dx * cast(NDArray[Any], self.T1),
                 cast(NDArray[Any], self.anchor)
                 + self.dx * cast(NDArray[Any], self.T1)
                 + self.dy * cast(NDArray[Any], self.T2),
-                cast(NDArray[Any], self.anchor)
-                + self.dy * cast(NDArray[Any], self.T2),
+                cast(NDArray[Any], self.anchor) + self.dy * cast(NDArray[Any], self.T2),
             ],
             dtype=np.float32,
         )
-        top: NDArray[Any] = bottom + self.height * cast(
-            NDArray[Any], self.normal
-        )
+        top: NDArray[Any] = bottom + self.height * cast(NDArray[Any], self.normal)
         return np.vstack([bottom, top])
 
     def _rebuild_preview(self) -> None:
