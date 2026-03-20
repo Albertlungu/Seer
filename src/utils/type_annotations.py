@@ -4,8 +4,9 @@
 Contains all type annotations used throughout code for DRY principle.
 """
 
+from typing import NotRequired, TypedDict
+
 import torch
-from typing import TypedDict
 
 # ======= Annotations/Aggregations =======
 
@@ -20,13 +21,36 @@ class AnnotatedObjectDetails(TypedDict):
 Annotations = dict[str, AnnotatedObjectDetails]
 
 
+class AtomDetails(TypedDict):
+    idx: int
+    symbol: str
+    position: list[float]
+
+
+class BondDetails(TypedDict):
+    begin: int
+    end: int
+    type: float
+
+
+class SimDetails(TypedDict):
+    atoms: list[AtomDetails]
+    bonds: list[BondDetails]
+
+
+class Molecule(TypedDict):
+    formula: str
+    smiles: str
+    sim_details: NotRequired[SimDetails]
+
+
 class AggregatedObjectDetails(AnnotatedObjectDetails, total=False):
-    composition: dict[str, dict]
+    composition: dict[str, Molecule]
 
 
 Aggregations = dict[str, AggregatedObjectDetails]
 
-#
+# ==== Legacy =====
 
 
 class ObjectData(TypedDict):
