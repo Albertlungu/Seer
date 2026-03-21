@@ -1,37 +1,22 @@
 """
-./src/render_molecules/get_molecule_details.py
+./src/render_molecules/mol_details_rdkit.py
 
-python -m src.render_molecules.get_molecule_details
+python -m src.render_molecules.mol_details_rdkit
 
 Uses rdkit to get coordinates, bond list, and other details of a molecule's 3D structure from
 SMILES strings.
 """
 
-import json
-
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+from src.utils.json_io import load_json, save_json
 from src.utils.type_annotations import (
     Aggregations,
     AtomDetails,
     BondDetails,
     SimDetails,
 )
-
-FOLDER_PATH = "data/vision_json/"
-
-
-def load_aggregations() -> Aggregations:
-    """
-    Loads the aggregations.
-
-    Returns:
-        Aggregations: The aggregated data keyed by object name.
-    """
-    with open(FOLDER_PATH + "aggregated.json", "rb") as f:
-        aggregations: Aggregations = json.load(f)
-    return aggregations
 
 
 def get_details(smiles: str) -> SimDetails:
@@ -71,15 +56,10 @@ def build_details(aggregations: Aggregations) -> Aggregations:
     return aggregations
 
 
-def save_aggregations(aggregations: Aggregations):
-    with open(FOLDER_PATH + "final_aggregated.json", "w") as f:
-        json.dump(aggregations, f, indent=2)
-
-
 def main():
-    aggregations = load_aggregations()
+    aggregations: Aggregations = load_json("aggregated.json")
     final = build_details(aggregations=aggregations)
-    save_aggregations(final)
+    save_json(final, "final_aggregated.json")
 
 
 if __name__ == "__main__":

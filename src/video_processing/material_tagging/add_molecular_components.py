@@ -14,13 +14,12 @@ import json
 import ollama
 import requests
 
+from src.utils.json_io import load_json, save_json
 from src.utils.type_annotations import (
     Aggregations,
     AnnotatedObjectDetails,
     Annotations,
 )
-
-FOLDER_PATH = "data/vision_json/"
 MODEL = "deepseek-v3.2:cloud"
 DELETE_MODEL = False
 SYSTEM_PROMPT = """
@@ -71,16 +70,6 @@ Output format (and nothing else):
 """
 
 
-def load_annotations() -> Annotations:
-    """
-    Loads the annotations.
-
-    Returns:
-        Annotations: The annotation data keyed by object name.
-    """
-    with open(FOLDER_PATH + "annotations.json", "rb") as f:
-        annotations: Annotations = json.load(f)
-    return annotations
 
 
 def run_ollama(object_details: AnnotatedObjectDetails, messages: list[dict]) -> dict:
@@ -126,7 +115,7 @@ def build_smiles(composition: dict[str, dict[str, str]]) -> str:
 
 
 def aggregate_compositions() -> Aggregations:
-    annotations = load_annotations()
+    annotations: Annotations = load_json("annotations.json")
     aggregations: Aggregations = {}
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     for obj_name, obj_details in annotations.items():
@@ -138,23 +127,12 @@ def aggregate_compositions() -> Aggregations:
     return aggregations
 
 
-def save_to_json(aggregations: Aggregations) -> None:
-    """
-    Saves the final aggregations to a file.
-
-    Args:
-        aggregations (Aggregations): The aggregated dictionary with the compositions.
-    """
-    with open(FOLDER_PATH + "aggregated.json", "w") as f:
-        json.dump(aggregations, f, indent=2)
-
-
 def main():
     print(f"Pulling {MODEL} from ollama")
     ollama.pull(MODEL)
 
     aggregated = aggregate_compositions()
-    save_to_json(aggregated)
+    save_json(aggregated, "aggregated.json")
 
     if DELETE_MODEL:
         ollama.delete(MODEL)
