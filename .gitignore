@@ -219,3 +219,4 @@ data/vision_json/legacy
 *.mov
 .vscode
 .claude
+tasks

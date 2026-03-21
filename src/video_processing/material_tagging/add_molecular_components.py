@@ -21,12 +21,11 @@ from src.utils.type_annotations import (
 )
 
 FOLDER_PATH = "data/vision_json/"
-MODEL = "qwen2.5:7b"
+MODEL = "deepseek-v3.2:cloud"
 DELETE_MODEL = False
-COMPOSITION_PROMPT = """
-You are an expert chemical engineer. You will receive a JSON object describing a single item in a
-scene, including its material composition. Your task is to identify the specific molecules or
-compounds that make up those materials and return their chemical formulas.
+SYSTEM_PROMPT = """
+You are an expert chemical engineer. For each item you receive, identify the specific molecules or
+compounds that make up its materials and return their chemical formulas as JSON.
 
 Rules:
 - Output ONLY a JSON object in exactly the format shown below. No explanation, no backticks,
@@ -43,6 +42,8 @@ Rules:
   for that object type and use that.
 - If a material has multiple distinct compounds, list each one as a separate key.
 - Do not include duplicate formulas under different keys.
+- Be consistent: if you identified a compound for a material in a previous item, use the same
+  compound name and formula for the same material in subsequent items.
 
 Incorrect output (polymer names and material names as keys, flat string values):
 {
@@ -67,9 +68,6 @@ Output format (and nothing else):
         "compound_name": {"formula": "formula"}
     }
 }
-
-Input:
-
 """
 
 
@@ -85,27 +83,30 @@ def load_annotations() -> Annotations:
     return annotations
 
 
-def run_ollama(object_details: AnnotatedObjectDetails) -> dict:
+def run_ollama(object_details: AnnotatedObjectDetails, messages: list[dict]) -> dict:
     """
-    Runs the ollama model given the details of some object inside the annotations JSON.
+    Sends a chat message to the model and appends the exchange to the shared history.
 
     Args:
-        object_details (str): The details of the object.
+        object_details (AnnotatedObjectDetails): The details of the object.
+        messages (list[dict]): Running chat history; mutated in place.
 
     Returns:
         dict: The JSON output from Ollama, being only the composition.
     """
     print("Generating response...")
-    response = ollama.generate(
+    messages.append({"role": "user", "content": str(object_details)})
+    response = ollama.chat(
         model=MODEL,
-        prompt=COMPOSITION_PROMPT + str(object_details),
+        messages=messages,
         format="json",
-    )  # format=json makes valid json output
+    )
+    content = response.message.content or ""
+    messages.append({"role": "assistant", "content": content})
+    return json.loads(content)
 
-    return json.loads(response.response)
 
-
-def build_smiles(composition: dict[str, dict[str, str]]) -> None:
+def build_smiles(composition: dict[str, dict[str, str]]) -> str:
     """
     Adds the SMILES string for each molecule name.
 
@@ -121,16 +122,18 @@ def build_smiles(composition: dict[str, dict[str, str]]) -> None:
             molec_details["smiles"] = smiles
         except KeyError as e:
             print(f"Key error: {e}")
+    return smiles
 
 
-def aggregate_compositions(delete_model: bool = False) -> Aggregations:
+def aggregate_compositions() -> Aggregations:
     annotations = load_annotations()
     aggregations: Aggregations = {}
+    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     for obj_name, obj_details in annotations.items():
-        response = run_ollama(object_details=obj_details)
+        response = run_ollama(object_details=obj_details, messages=messages)
         print(response)
         composition = response["composition"]
-        build_smiles(composition)
+        print(build_smiles(composition))
         aggregations[obj_name] = {**obj_details, "composition": composition}
     return aggregations
 

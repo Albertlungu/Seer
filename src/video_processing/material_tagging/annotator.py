@@ -1,7 +1,7 @@
 """
 ./src/video_processing/annotator.py
 
-python -m src.video_processing.annotator
+python -m src.video_processing.material_tagging.annotator
 
 This is a manual annotator where the user makes 3D objects themselves as bounding boxes.
 Press E to enter annotation mode, click anchor, drag base, height, resize with handles, press
@@ -20,7 +20,7 @@ import open3d as o3d
 from direct.gui.DirectGui import DirectButton, DirectEntry, DirectFrame, DirectLabel
 from direct.gui.OnscreenText import OnscreenText
 from direct.showbase.ShowBaseGlobal import globalClock
-from environment import Room
+from src.video_processing.environment import Room
 from numpy.typing import NDArray
 from panda3d.core import (
     BitMask32,
