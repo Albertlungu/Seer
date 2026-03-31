@@ -4,9 +4,9 @@
 Contains all type annotations used throughout code for DRY principle.
 """
 
-from typing import NotRequired, Optional, TypedDict
+from typing import Any, NotRequired, Optional, TypedDict
 
-import torch
+# import torch
 
 # ======= Annotations/Aggregations =======
 
@@ -110,8 +110,8 @@ class ObjectData(TypedDict):
 
 
 class Result(TypedDict):
-    scores: torch.Tensor | list  # Shape: (N,) the number of objects
-    boxes: torch.Tensor | list[list]  # Shape: (N, 4), where N is number of objects
+    scores: Any | list  # Shape: (N,) the number of objects
+    boxes: Any | list[list]  # Shape: (N, 4), where N is number of objects
     labels: list[str]
 
 
