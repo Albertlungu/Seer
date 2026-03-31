@@ -22,7 +22,9 @@ class MoleculeTemplate:
     name: str  # Molecule name/label, e.g. cellobiose
     aids: np.ndarray  # Identifiers from final_aggregated.json -> not the IDX, but the ID each element is attributed
     elements: np.ndarray  # Atomic numbers aligned with aids by index
-    local_xyz: np.ndarray  # The coordinates per each atom in the molecule's local space
+    local_xyz: tuple[
+        np.ndarray, np.ndarray, np.ndarray
+    ]  # The coordinates per each atom in the molecule's local space
     bonds_aid1: np.ndarray  # Starting Atom ID for bond
     bonds_aid2: np.ndarray  # Ending Atom ID for bond
     bond_order: np.ndarray  # Bond order
@@ -49,18 +51,25 @@ class MoleculeInstance:
     id: int  # Unique ID for bookkeeping
 
 
-class SceneState:
+class ObjectState:
     """
-    The full snapshot of the world.
-    It represents the entire world at each instance, and is the container for all templates, instances, and global constraints.
+    The full snapshot of a single object.
     """
 
+    object_key: str  # Canonical unique key from JSON, e.g. books_2
+    object_name: str  # Category/type name, e.g. books
+    instance_id: str  # Runtime instance identifier; defaults to object_key
+    display_name: str  # Human-readable label for logs/debug views
     templates: list[
         MoleculeTemplate
     ]  # The unique molecular templates, each having a unique IDX
     instances: list[
         MoleculeInstance
     ]  # All placed molecules currently in the scene. Points to an IDX in the templates
-    box_min: np.ndarray  # BBox corner
-    box_max: np.ndarray  # BBox corner
+    box_bottom: np.ndarray  # BBox corner
+    box_top: np.ndarray  # BBox corner
     rng_seed: int  # Random seed for reproducible arrangement
+
+
+class Environment:
+    scene_states: list[ObjectState]
