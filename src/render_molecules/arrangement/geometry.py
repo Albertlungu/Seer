@@ -3,17 +3,7 @@
 
 python -m src.render_molecules.arrangement.geometry
 
-Houses:
-- Local -> world coordinate transform helpers, which take in the molecule's conformer coordinates
-  and apply a transformation matrix/vector to them to place them in teh real world.
-- Rotation and translation composition
-    - Math helpers to rotate and shift arrays of atoms
-    - e.g. taking an instance position and an orientation/representation (such as Euler angles or
-      Quaternions) and creating a transform matrix
-- Molecule extent and axis-aligned bbox helpers
-    - function that takes a molecule template and calculates its local bounding box (min, max,
-      XYZ ranges) or rough radius
-    - to make sure atoms don't spawn inside each other
+Math utilities for transforming molecules between local and world coordinate systems, and checking spatial relationships.
 """
 
 import numpy as np
@@ -43,10 +33,27 @@ def compute_molecule_bbox(template: MoleculeTemplate) -> tuple[np.ndarray, np.nd
     return min_bound, max_bound
 
 
-def compute_instance_bbox_world(
-    instance: MoleculeInstance,
-) -> tuple[np.ndarray, np.ndarray]:
-    pass
+def compute_bounding_sphere_radius(template: MoleculeTemplate) -> float | np.floating:
+    """
+    Creates a spherical bounding box around a molecule, returning its radius, centered around CoM
+
+    Args:
+        template (MoleculeTemplate): The molecule template
+
+    Returns:
+        float: Sphere radius
+    """
+    com = calculate_center_of_mass(template=template)
+
+    local_xyz = template.local_xyz
+
+    coords = np.column_stack(
+        local_xyz
+    )  # Groups xyz[0], [1], and [2] into a single array of coords, doing it for all the rest too
+
+    distances = np.linalg.norm(coords - com, axis=1)
+
+    return float(np.max(distances))
 
 
 def apply_transformation(
@@ -75,6 +82,24 @@ def apply_transformation(
     world = rotation_matrix @ coords
     world = world + position.reshape(3, 1)
     return world[0], world[1], world[2]
+
+
+def apply_instance_transform(
+    template: MoleculeTemplate, instance: MoleculeInstance
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Transform all atoms from a molecule instance from local space to world space.
+
+    Args:
+        template (MoleculeTemplate): The molecule template
+        instance (MoleculeInstance): The molecule instance
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing all transformed X, Y, and Z
+    """
+    return apply_transformation(
+        template=template, position=instance.position, rotation_matrix=instance.rotation
+    )
 
 
 def get_rotation_matrix(yaw: float, pitch: float, roll: float) -> np.ndarray:
@@ -122,7 +147,7 @@ def get_rotation_matrix(yaw: float, pitch: float, roll: float) -> np.ndarray:
 
 def calculate_center_of_mass(
     template: MoleculeTemplate,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """
     Calculates center of mass of a molecule in its local space.
 
@@ -141,11 +166,11 @@ def calculate_center_of_mass(
 
     total_mass = sum(element_masses_used)
 
-    com_x = np.sum(element_masses_used * local_xyz[0]) / total_mass
-    com_y = np.sum(element_masses_used * local_xyz[1]) / total_mass
-    com_z = np.sum(element_masses_used * local_xyz[2]) / total_mass
+    com_x: float = np.sum(element_masses_used * local_xyz[0]) / total_mass
+    com_y: float = np.sum(element_masses_used * local_xyz[1]) / total_mass
+    com_z: float = np.sum(element_masses_used * local_xyz[2]) / total_mass
 
-    return com_x, com_y, com_z
+    return np.array([com_x, com_y, com_z])
 
 
 def distance_between_points(
