@@ -40,7 +40,6 @@ class ConformersDetails(TypedDict):
 
 
 class CoordsDetails(TypedDict):
-    type: list[int]
     aid: list[int]
     conformers: list[ConformersDetails]
     data: list[dict[str, dict]]
@@ -51,7 +50,7 @@ class SimDetails(TypedDict):
 
     atoms: AtomDetails
     bonds: BondDetails
-    coords: list[dict]
+    coords: list[CoordsDetails]
 
 
 # ======= PubChem 3D structure =======
