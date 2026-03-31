@@ -17,9 +17,11 @@ This is a work in progress. The reconstruction-to-annotation pipeline is working
 - Manual 3D bounding box annotation tool for labeling objects and materials
 - LLM-based material composition analysis (Deepseek via Ollama)
 - Molecular 3D structure retrieval from PubChem
+- Multi-molecule simulation in a vacuum (no zooming in yet, just the simulation)
 
 ## Roadmap
 
+- Adding of temporal dimension with force-fields and other elements
 - Molecular visualization: rendering atoms and bonds inside the viewer
 - Atomic level: Bohr model and quantum mechanical orbital representation
 - Subatomic level: protons, neutrons
