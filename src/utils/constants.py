@@ -28,5 +28,16 @@ ELEMENT_RADII: dict[int, float] = {
     26: 0.12,
 }
 
+ELEMENT_MASSES: dict[int, float] = {
+    1: 1.008,
+    6: 12.011,
+    7: 14.007,
+    8: 15.999,
+    14: 28.085,
+    16: 32.060,
+    20: 40.078,
+    26: 55.845,
+}
+
 DEFAULT_COLOR: tuple[float, float, float] = (0.8, 0.0, 0.8)
 DEFAULT_RADIUS: float = 0.08
