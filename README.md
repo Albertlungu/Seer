@@ -18,6 +18,7 @@ This is a work in progress. The reconstruction-to-annotation pipeline is working
 - LLM-based material composition analysis (Deepseek via Ollama)
 - Molecular 3D structure retrieval from PubChem
 - Multi-molecule simulation in a vacuum (no zooming in yet, just the simulation)
+  - For placement: make sure no atoms from neighboring instances are intercepting upon render.
 
 ## Roadmap
 

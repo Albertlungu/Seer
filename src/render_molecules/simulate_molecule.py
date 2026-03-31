@@ -6,7 +6,6 @@ python -m src.render_molecules.simulate_molecule
 Simulates a single object from final_aggregated.json in a Panda3D window.
 Picks the first molecule that has sim_details and renders it with CPK colours.
 "aid"s are the Atom IDs. In the bonds section, "aid1" means starting atom ID, and "aid2" end atom ID
-
 """
 
 import json
@@ -16,35 +15,15 @@ import numpy as np
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import NodePath, Point3
 
+from src.utils.constants import (
+    DEFAULT_COLOR,
+    DEFAULT_RADIUS,
+    ELEMENT_COLORS,
+    ELEMENT_RADII,
+    FINAL_AGGREGATED,
+)
 from src.utils.json_io import load_json
 from src.utils.type_annotations import SimDetails
-
-FINAL_AGGREGATED = "final_aggregated.json"
-
-ELEMENT_COLORS: dict[int, tuple[float, float, float]] = {
-    1: (1.0, 1.0, 1.0),  # Hydrogen
-    6: (0.3, 0.3, 0.3),  # Carbon
-    7: (0.2, 0.4, 1.0),  # Nitrogen
-    8: (1.0, 0.2, 0.2),  # Oxygen
-    14: (0.7, 0.5, 0.1),  # Silicon
-    16: (1.0, 0.9, 0.0),  # Sulfur
-    20: (0.5, 0.5, 0.5),  # Calcium
-    26: (0.6, 0.3, 0.1),  # Iron
-}
-
-ELEMENT_RADII: dict[int, float] = {
-    1: 0.05,
-    6: 0.08,
-    7: 0.08,
-    8: 0.08,
-    14: 0.10,
-    16: 0.10,
-    20: 0.12,
-    26: 0.12,
-}
-
-DEFAULT_COLOR: tuple[float, float, float] = (0.8, 0.0, 0.8)
-DEFAULT_RADIUS: float = 0.08
 
 
 def draw_atom(
@@ -234,18 +213,17 @@ class MoleculeViewer(ShowBase):
         self.cam.lookAt(0, 0, 0)
 
         data = load_json(FINAL_AGGREGATED)
-        start_offset = 0.0
 
         for obj in data.values():
             for mol in obj.get("composition", {}).values():
                 if "sim_details" in mol:
-                    build_multiple_molecules(
+                    build_molecule(
                         self,
                         self.render,
                         mol["sim_details"],
                         scale=3.0,
-                        start_offset=start_offset,
-                        num_molecules=20,
+                        offset_axis="x",
+                        offset_value=0.0,
                     )
                     return
 
