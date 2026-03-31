@@ -45,7 +45,7 @@ class MoleculeInstance:
     """
 
     template_id: int  # Index/key pointing into SceneState.templates
-    position: np.ndarray  # The world translation vector for the molecule instance
+    position: np.ndarray  # The instance's position in the full environment
     rotation: np.ndarray  # World orientation transformation for the instance
     velocity: np.ndarray  # Not yet used, for future time-related shenanigans
     id: int  # Unique ID for bookkeeping
