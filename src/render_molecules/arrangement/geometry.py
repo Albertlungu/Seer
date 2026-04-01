@@ -14,6 +14,10 @@ from src.render_molecules.arrangement.scene_state import (
 )
 from src.utils.constants import ELEMENT_MASSES
 
+# ============================================================================
+# Bounding Box Helpers
+# ============================================================================
+
 
 def compute_molecule_bbox(template: MoleculeTemplate) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -33,7 +37,7 @@ def compute_molecule_bbox(template: MoleculeTemplate) -> tuple[np.ndarray, np.nd
     return min_bound, max_bound
 
 
-def compute_bounding_sphere_radius(template: MoleculeTemplate) -> float | np.floating:
+def compute_bounding_sphere_radius(template: MoleculeTemplate) -> float:
     """
     Creates a spherical bounding box around a molecule, returning its radius, centered around CoM
 
@@ -56,50 +60,31 @@ def compute_bounding_sphere_radius(template: MoleculeTemplate) -> float | np.flo
     return float(np.max(distances))
 
 
-def apply_transformation(
-    template: MoleculeTemplate,
-    position: np.ndarray,
-    rotation_matrix: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Applies rotation then translation.
-
-    Args:
-        local_xyz (tuple[np.ndarray, np.ndarray, np.ndarray]): Local XYZ coordinates of a molecule
-        position (np.ndarray): Translation vector of shape (3,): [tx, ty, tz]
-        rotation_matrix (np.ndarray): Rotation matrix of shape (3, 3)
-                                      [ cos(theta)  -sin(theta)   0 ]
-                                      [ sin(theta)   cos(theta)   0 ]
-                                      [    0             0        1 ]
-
-    Returns:
-        tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing transformed XYZ
-    """
-    local_xyz = template.local_xyz
-    coords = np.vstack(
-        local_xyz
-    )  # np.vstack stacks a tuple of multiple elements into arrays
-    world = rotation_matrix @ coords
-    world = world + position.reshape(3, 1)
-    return world[0], world[1], world[2]
-
-
-def apply_instance_transform(
+def compute_instance_bbox(
     template: MoleculeTemplate, instance: MoleculeInstance
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    Basically apply_transform() but taking an instance, which contains the position vector and rotation matrix, instead of taking them raw.
+    Computes the bbox for a molecule instance in world space
 
     Args:
-        template (MoleculeTemplate): The molecule template
-        instance (MoleculeInstance): The molecule instance
+        template (MoleculeTemplate): The molecule template to apply a transformation to
+        instance (MoleculeInstance): The molecule instance containing position and rotation
 
     Returns:
-        tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing all transformed X, Y, and Z
+        tuple[np.ndarray, np.ndarray]: Tuple with lower corner and upper corner, respectively
     """
-    return apply_transformation(
-        template=template, position=instance.position, rotation_matrix=instance.rotation
-    )
+    world_instance = apply_instance_transform(template=template, instance=instance)
+    coords = np.column_stack(world_instance)
+
+    lowest = np.min(coords, axis=0)
+    highest = np.max(coords, axis=0)
+
+    return lowest, highest
+
+
+# ============================================================================
+# Coordinate Transformations
+# ============================================================================
 
 
 def get_rotation_matrix(yaw: float, pitch: float, roll: float) -> np.ndarray:
@@ -145,6 +130,57 @@ def get_rotation_matrix(yaw: float, pitch: float, roll: float) -> np.ndarray:
     return Rz @ Ry @ Rx
 
 
+def apply_transformation(
+    template: MoleculeTemplate,
+    position: np.ndarray,
+    rotation_matrix: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Applies rotation then translation.
+
+    Args:
+        local_xyz (tuple[np.ndarray, np.ndarray, np.ndarray]): Local XYZ coordinates of a molecule
+        position (np.ndarray): Translation vector of shape (3,): [tx, ty, tz]
+        rotation_matrix (np.ndarray): Rotation matrix of shape (3, 3)
+                                      [ cos(theta)  -sin(theta)   0 ]
+                                      [ sin(theta)   cos(theta)   0 ]
+                                      [    0             0        1 ]
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing transformed XYZ
+    """
+    local_xyz = template.local_xyz
+    coords = np.vstack(
+        local_xyz
+    )  # np.vstack stacks a tuple of multiple elements into arrays
+    world = rotation_matrix @ coords
+    world = world + position.reshape(3, 1)
+    return world[0], world[1], world[2]
+
+
+def apply_instance_transform(
+    template: MoleculeTemplate, instance: MoleculeInstance
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Applies rotation and translation using instance's stored position and rotation.
+
+    Args:
+        template (MoleculeTemplate): The molecule template
+        instance (MoleculeInstance): The molecule instance containing position and rotation
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing all transformed X, Y, and Z
+    """
+    return apply_transformation(
+        template=template, position=instance.position, rotation_matrix=instance.rotation
+    )
+
+
+# ============================================================================
+# Molecular Properties
+# ============================================================================
+
+
 def calculate_center_of_mass(
     template: MoleculeTemplate,
 ) -> np.ndarray:
@@ -171,6 +207,11 @@ def calculate_center_of_mass(
     com_z: float = np.sum(element_masses_used * local_xyz[2]) / total_mass
 
     return np.array([com_x, com_y, com_z])
+
+
+# ============================================================================
+# Spatial Checkers (Collision Detection)
+# ============================================================================
 
 
 def point_in_bounds(point: np.ndarray, bbox: tuple[np.ndarray, np.ndarray]) -> bool:
@@ -219,7 +260,7 @@ def check_atom_overlap(
 
     Args:
         atom1 (np.ndarray): The first atom's XYZ coordinates.
-        atom2 (np.ndarray): The second atom's XYZ coords.
+        atom2 (np.ndarray): The second atom's XYZ coordinates.
         r1 (float): The first atom's radius.
         r2 (float): The second atom's radius.
 
@@ -228,6 +269,11 @@ def check_atom_overlap(
     """
     delta = atom1 - atom2
     return bool(np.dot(delta, delta) < (r1 + r2) ** 2)
+
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
 
 
 def distance_between_points(
