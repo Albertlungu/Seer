@@ -176,6 +176,22 @@ def calculate_center_of_mass(
 def point_in_bounds(point: np.ndarray, bbox: tuple[np.ndarray, np.ndarray]) -> bool:
     """
     Determines if a point is within a bounding box, given the point coordinates and the bbox.
+    Example:
+        point = np.array([1.2, -0.5, 3.0])
+        lower = np.array([0.0, -1.0, 2.5])
+        upper = np.array([2.0, 0.0, 4.0])
+
+        point >= lower
+        -> np.array([ True, True, True])
+
+        point <= upper
+        -> np.array([ True, True, True])
+
+        (point >= lower) & (point <= upper)
+        -> np.array([ True, True, True])
+
+        np.all((point >= lower) & (point <= upper))
+        -> True
 
     Args:
         point (np.ndarray): Point coordinates.
@@ -193,24 +209,25 @@ def point_in_bounds(point: np.ndarray, bbox: tuple[np.ndarray, np.ndarray]) -> b
     return bool(
         np.all((point >= lower) & (point <= upper))
     )  # Checks for each column in point and lower/upper
+
+
+def check_atom_overlap(
+    atom1: np.ndarray, atom2: np.ndarray, r1: float, r2: float
+) -> bool:
     """
-    Example:
-        point = np.array([1.2, -0.5, 3.0])
-        lower = np.array([0.0, -1.0, 2.5])
-        upper = np.array([2.0, 0.0, 4.0])
+    Checks if two atoms overlap, taking into account their radii.
 
-        point >= lower
-        -> np.array([ True, True, True])
+    Args:
+        atom1 (np.ndarray): The first atom's XYZ coordinates.
+        atom2 (np.ndarray): The second atom's XYZ coords.
+        r1 (float): The first atom's radius.
+        r2 (float): The second atom's radius.
 
-        point <= upper
-        -> np.array([ True, True, True])
-
-        (point >= lower) & (point <= upper)
-        -> np.array([ True, True, True])
-
-        np.all((point >= lower) & (point <= upper))
-        -> True
+    Returns:
+        bool: True if they overlap, false otherwise.
     """
+    delta = atom1 - atom2
+    return bool(np.dot(delta, delta) < (r1 + r2) ** 2)
 
 
 def distance_between_points(
