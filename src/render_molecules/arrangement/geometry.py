@@ -12,7 +12,7 @@ from src.render_molecules.arrangement.scene_state import (
     MoleculeInstance,
     MoleculeTemplate,
 )
-from src.utils.constants import ELEMENT_MASSES
+from src.utils.constants import DEFAULT_RADIUS, ELEMENT_MASSES, ELEMENT_RADII
 
 # ============================================================================
 # Bounding Box Helpers
@@ -209,6 +209,36 @@ def calculate_center_of_mass(
     return np.array([com_x, com_y, com_z])
 
 
+def calculate_environment_center_of_mass(
+    template: MoleculeTemplate,
+    instance: MoleculeInstance,
+) -> np.ndarray:
+    """
+    Calculates center of mass of a molecule in environment space.
+
+    Args:
+        template (MoleculeTemplate): The molecule template
+        instance (MoleculeInstance): The molecule instance
+
+    Returns:
+        np.ndarray: XYZ of the local center of mass (COM)
+    """
+    xyz = apply_instance_transform(template=template, instance=instance)
+    elements = template.elements
+
+    element_masses_used = np.array(
+        [ELEMENT_MASSES.get(element) for element in elements]
+    )
+
+    total_mass = sum(element_masses_used)
+
+    com_x: float = np.sum(element_masses_used * xyz[0]) / total_mass
+    com_y: float = np.sum(element_masses_used * xyz[1]) / total_mass
+    com_z: float = np.sum(element_masses_used * xyz[2]) / total_mass
+
+    return np.array([com_x, com_y, com_z])
+
+
 # ============================================================================
 # Spatial Checkers (Collision Detection)
 # ============================================================================
@@ -252,23 +282,135 @@ def point_in_bounds(point: np.ndarray, bbox: tuple[np.ndarray, np.ndarray]) -> b
     )  # Checks for each column in point and lower/upper
 
 
-def check_atom_overlap(
-    atom1: np.ndarray, atom2: np.ndarray, r1: float, r2: float
+def check_sphere_overlap(
+    sphere_1: np.ndarray, sphere_2: np.ndarray, r1: float, r2: float
 ) -> bool:
     """
-    Checks if two atoms overlap, taking into account their radii.
+    Checks if two spheres overlap, taking into account their radii.
 
     Args:
-        atom1 (np.ndarray): The first atom's XYZ coordinates.
-        atom2 (np.ndarray): The second atom's XYZ coordinates.
-        r1 (float): The first atom's radius.
-        r2 (float): The second atom's radius.
+        sphere_1 (np.ndarray): The first sphere's XYZ coordinates.
+        sphere_2 (np.ndarray): The second sphere's XYZ coordinates.
+        r1 (float): The first sphere's radius.
+        r2 (float): The second sphere's radius.
 
     Returns:
         bool: True if they overlap, false otherwise.
     """
-    delta = atom1 - atom2
+    delta = sphere_1 - sphere_2
     return bool(np.dot(delta, delta) < (r1 + r2) ** 2)
+
+
+def check_bbox_overlap(
+    bbox_1: tuple[np.ndarray, np.ndarray], bbox_2: tuple[np.ndarray, np.ndarray]
+) -> bool:
+    """
+    Checks if two AABB bboxes overlap.
+
+    Args:
+        bbox_1 (tuple[np.ndarray, np.ndarray]): First bbox
+        bbox_2 (tuple[np.ndarray, np.ndarray]): Second bbox
+
+    Returns:
+        bool: True if overlap, false otherwise
+    """
+    lowest_1, highest_1 = bbox_1
+    lowest_2, highest_2 = bbox_2
+
+    # Normalize corners in case any bbox is provided in reversed order.
+    low_1, high_1 = np.minimum(lowest_1, highest_1), np.maximum(lowest_1, highest_1)
+    low_2, high_2 = np.minimum(lowest_2, highest_2), np.maximum(lowest_2, highest_2)
+
+    # Two AABBs overlap iff their projected intervals overlap on all axes.
+    return bool(np.all((low_1 <= high_2) & (low_2 <= high_1)))
+
+
+def check_instance_overlap(
+    template_1: MoleculeTemplate,
+    template_2: MoleculeTemplate,
+    instance_1: MoleculeInstance,
+    instance_2: MoleculeInstance,
+) -> bool:
+    """
+    Checks whether two molecule instances overlap in world space.
+
+    The check is staged and short-circuits:
+    1) Bounding-sphere overlap gate
+    2) AABB overlap gate
+    3) Atom-level sphere overlap
+
+    At each gate, "pass" means no overlap and the function returns False early.
+    The function returns True only if all gates indicate overlap and at least one
+    atom pair overlaps.
+
+    Args:
+        template_1 (MoleculeTemplate): First molecule template.
+        template_2 (MoleculeTemplate): Second molecule template.
+        instance_1 (MoleculeInstance): First molecule instance.
+        instance_2 (MoleculeInstance): Second molecule instance.
+
+    Returns:
+        bool: True if the instances overlap, False otherwise.
+    """
+    transformed_coords_1 = np.column_stack(
+        apply_instance_transform(template=template_1, instance=instance_1)
+    )
+    transformed_coords_2 = np.column_stack(
+        apply_instance_transform(template=template_2, instance=instance_2)
+    )
+
+    com_1 = calculate_environment_center_of_mass(
+        template=template_1, instance=instance_1
+    )
+    com_2 = calculate_environment_center_of_mass(
+        template=template_2, instance=instance_2
+    )
+
+    sphere_radius_1 = compute_bounding_sphere_radius(template=template_1)
+    sphere_radius_2 = compute_bounding_sphere_radius(template=template_2)
+
+    bbox_1 = compute_instance_bbox(template=template_1, instance=instance_1)
+    bbox_2 = compute_instance_bbox(template=template_2, instance=instance_2)
+
+    # "Pass" means no overlap at this stage.
+    sphere_pass = not check_sphere_overlap(
+        com_1, com_2, sphere_radius_1, sphere_radius_2
+    )
+    if sphere_pass:
+        return False
+
+    bbox_pass = not check_bbox_overlap(bbox_1=bbox_1, bbox_2=bbox_2)
+    if bbox_pass:
+        return False
+
+    radii_1 = np.array(
+        [
+            ELEMENT_RADII.get(int(element), DEFAULT_RADIUS)
+            for element in template_1.elements
+        ]
+    )
+    radii_2 = np.array(
+        [
+            ELEMENT_RADII.get(int(element), DEFAULT_RADIUS)
+            for element in template_2.elements
+        ]
+    )
+
+    atom_overlap = False
+    for i, atom_1 in enumerate(transformed_coords_1):
+        for j, atom_2 in enumerate(transformed_coords_2):
+            if check_sphere_overlap(
+                atom_1, atom_2, float(radii_1[i]), float(radii_2[j])
+            ):
+                atom_overlap = True
+                break
+        if atom_overlap:
+            break
+
+    if not atom_overlap:
+        return False
+
+    return True
 
 
 # ============================================================================
