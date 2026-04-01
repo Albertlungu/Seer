@@ -88,7 +88,7 @@ def apply_instance_transform(
     template: MoleculeTemplate, instance: MoleculeInstance
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Transform all atoms from a molecule instance from local space to world space.
+    Basically apply_transform() but taking an instance, which contains the position vector and rotation matrix, instead of taking them raw.
 
     Args:
         template (MoleculeTemplate): The molecule template
@@ -155,7 +155,7 @@ def calculate_center_of_mass(
         template (MoleculeTemplate): The molecule template
 
     Returns:
-        tuple[np.ndarray, np.ndarray, np.ndarray]: XYZ of the local center of mass (COM)
+        np.ndarray: XYZ of the local center of mass (COM)
     """
     local_xyz = template.local_xyz
     elements = template.elements
@@ -171,6 +171,46 @@ def calculate_center_of_mass(
     com_z: float = np.sum(element_masses_used * local_xyz[2]) / total_mass
 
     return np.array([com_x, com_y, com_z])
+
+
+def point_in_bounds(point: np.ndarray, bbox: tuple[np.ndarray, np.ndarray]) -> bool:
+    """
+    Determines if a point is within a bounding box, given the point coordinates and the bbox.
+
+    Args:
+        point (np.ndarray): Point coordinates.
+        bbox (tuple[np.ndarray, np.ndarray]): Tuple of bottom, top bbox coordinates
+
+    Returns:
+        bool: True if point is in bounds, false if not.
+    """
+    bbox_bottom, bbox_top = bbox
+    lower = np.minimum(
+        bbox_bottom, bbox_top
+    )  # Makes sure lower corner is correct even if inputs are reversed
+    upper = np.maximum(bbox_bottom, bbox_top)  # Same thing here
+
+    return bool(
+        np.all((point >= lower) & (point <= upper))
+    )  # Checks for each column in point and lower/upper
+    """
+    Example:
+        point = np.array([1.2, -0.5, 3.0])
+        lower = np.array([0.0, -1.0, 2.5])
+        upper = np.array([2.0, 0.0, 4.0])
+
+        point >= lower
+        -> np.array([ True, True, True])
+
+        point <= upper
+        -> np.array([ True, True, True])
+
+        (point >= lower) & (point <= upper)
+        -> np.array([ True, True, True])
+
+        np.all((point >= lower) & (point <= upper))
+        -> True
+    """
 
 
 def distance_between_points(
