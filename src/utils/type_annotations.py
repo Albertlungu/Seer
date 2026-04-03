@@ -4,9 +4,16 @@
 Contains all type annotations used throughout code for DRY principle.
 """
 
-from typing import Any, NotRequired, Optional, TypedDict
+from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
-# import torch
+import numpy as np
+import numpy.typing as npt
+
+# ======= Numpy Arrays =======
+Matrix3x4 = Annotated[npt.NDArray[np.float64], Literal[3, 4]]
+Matrix3x3 = Annotated[npt.NDArray[np.float64], Literal[3, 3]]
+Matrix3x1 = Annotated[npt.NDArray[np.float64], Literal[3,]]
+
 
 # ======= Annotations/Aggregations =======
 
