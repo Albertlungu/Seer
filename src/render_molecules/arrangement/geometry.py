@@ -195,10 +195,12 @@ def calculate_center_of_mass(
     """
     local_xyz = template.local_xyz
     elements = template.elements
-
-    element_masses_used = np.array(
-        [ELEMENT_MASSES.get(element) for element in elements]
-    )
+    try:
+        element_masses_used = np.array(
+            [ELEMENT_MASSES.get(element) for element in elements]
+        )
+    except KeyError as e:
+        print(f"KeyError: Mass did not exist for element: {e}")
 
     total_mass = sum(element_masses_used)
 
