@@ -39,17 +39,23 @@ from src.utils.type_annotations import (
 def create_env():
     data = load_json(FINAL_AGGREGATED)
 
-    environment = Environment()
-    environment.scene_states = []
+    environment = Environment(scene_states=[])
 
     for object_key, object_details in data.items():
-        obj = ObjectState()
-        obj.object_key = object_key
-        obj.object_name = object_details.get("name", object_key)
-        obj.instance_id = object_key
-        obj.display_name = object_key.replace("_", " ").title()
-        obj.templates = []
-        for molecule_name, molecule_details in object_details["composition"].items():
+        obj = ObjectState(
+            object_key=object_key,
+            object_name=object_details.get("name", object_key),
+            instance_id=object_key,
+            display_name=object_key.replace("_", " ").title(),
+            templates={},
+            instances={},
+            box_bottom=np.array(object_details["corners"]["bottom"]),
+            box_top=np.array(object_details["corners"]["top"]),
+            rng_seed=0,
+        )
+        for i, (molecule_name, molecule_details) in enumerate(
+            object_details["composition"].items()
+        ):
             sim_details: SimDetails | None = molecule_details.get("sim_details")
             if sim_details is None:
                 raise ValueError(
@@ -66,20 +72,21 @@ def create_env():
 
             coords_details: CoordsDetails = coords[0]
 
-            molecule_template = MoleculeTemplate()
-            molecule_template.name = molecule_name
-            molecule_template.aids = np.array(atom_details["aid"])
-            molecule_template.elements = np.array(atom_details["element"])
-            molecule_template.local_xyz = (
-                np.array(coords_details["conformers"][0]["x"]),
-                np.array(coords_details["conformers"][0]["y"]),
-                np.array(coords_details["conformers"][0]["z"]),
+            molecule_template = MoleculeTemplate(
+                name=molecule_name,
+                aids=np.array(atom_details["aid"]),
+                elements=np.array(atom_details["element"]),
+                local_xyz=(
+                    np.array(coords_details["conformers"][0]["x"]),
+                    np.array(coords_details["conformers"][0]["y"]),
+                    np.array(coords_details["conformers"][0]["z"]),
+                ),
+                bonds_aid1=np.array(bond_details["aid1"]),
+                bonds_aid2=np.array(bond_details["aid2"]),
+                bond_order=np.array(bond_details["order"]),
             )
-            molecule_template.bonds_aid1 = np.array(bond_details["aid1"])
-            molecule_template.bonds_aid2 = np.array(bond_details["aid2"])
-            molecule_template.bond_order = np.array(bond_details["order"])
 
-            obj.templates.append(molecule_template)
+            obj.templates[i] = molecule_template
 
         obj.box_bottom = np.array(object_details["corners"]["bottom"])
         obj.box_top = np.array(object_details["corners"]["top"])
@@ -89,4 +96,9 @@ def create_env():
     return environment
 
 
-print(create_env().scene_states)
+def main():
+    create_env()
+
+
+if __name__ == "__main__":
+    main()
