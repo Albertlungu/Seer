@@ -7,9 +7,12 @@ This is not something that should be ran, instead it is just a container for all
 It contains all the wrappers for everything to keep it all organized.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 
 
+@dataclass
 class MoleculeTemplate:
     """
     Immutable template for a single molecular species, such as cellobiose.
@@ -30,6 +33,7 @@ class MoleculeTemplate:
     bond_order: np.ndarray  # Bond order
 
 
+@dataclass
 class MoleculeInstance:
     """
     The copy of the template in world space/environment
@@ -44,13 +48,16 @@ class MoleculeInstance:
         - Placement and rotation of instances
     """
 
-    template_id: int  # Index/key pointing into SceneState.templates
+    template_id: int  # Index/key pointing into ObjectState.templates
     position: np.ndarray  # The instance's position in the full environment
     rotation: np.ndarray  # World orientation transformation for the instance
-    velocity: np.ndarray  # Not yet used, for future time-related shenanigans
     id: int  # Unique ID for bookkeeping
+    velocity: np.ndarray | None = (
+        None  # Not yet used, for future time-related shenanigans
+    )
 
 
+@dataclass
 class ObjectState:
     """
     The full snapshot of a single object.
@@ -60,16 +67,17 @@ class ObjectState:
     object_name: str  # Category/type name, e.g. books
     instance_id: str  # Runtime instance identifier; defaults to object_key
     display_name: str  # Human-readable label for logs/debug views
-    templates: list[
-        MoleculeTemplate
-    ]  # The unique molecular templates, each having a unique IDX
-    instances: list[
-        MoleculeInstance
-    ]  # All placed molecules currently in the scene. Points to an IDX in the templates
+    templates: dict[
+        int, MoleculeTemplate
+    ]  # Points each molecule template ID to its respective molecule template
+    instances: dict[
+        int, MoleculeInstance
+    ]  # Points each instance ID to its respective instance for easier lookup
     box_bottom: np.ndarray  # BBox corner
     box_top: np.ndarray  # BBox corner
     rng_seed: int  # Random seed for reproducible arrangement
 
 
+@dataclass
 class Environment:
     scene_states: list[ObjectState]
