@@ -266,17 +266,22 @@ def _create_density_cloud(
     cloud = cast(NodePath, base.loader.loadModel("models/misc/sphere"))
     cloud.reparentTo(parent)
 
-    mid = ((start + end) * 0.5) + center_offset
-    length = float(np.linalg.norm(end - start))
+    start_vec = np.asarray(start, dtype=float).reshape(3)
+    end_vec = np.asarray(end, dtype=float).reshape(3)
+    offset_vec = np.asarray(center_offset, dtype=float).reshape(3)
+
+    mid = ((start_vec + end_vec) * 0.5) + offset_vec
+    length = float(np.linalg.norm(end_vec - start_vec))
     if length < 1e-8:
         length = 1e-8
 
     cloud.setPos(float(mid[0]), float(mid[1]), float(mid[2]))
-    cloud.lookAt(float(end), float(end), float(end[2]))
+    cloud.lookAt(float(end_vec[0]), float(end_vec[1]), float(end_vec[2]))
     cloud.setScale(radial_scale, length * 0.5, radial_scale)
 
     cloud.setTransparency(TransparencyAttrib.MAlpha)
     cloud.setColor(color[0], color[1], color[2], alpha)
+    return cloud
 
 
 def _perpendicular_axes(unit_axis: Matrix3x1) -> tuple[np.ndarray, np.ndarray]:
