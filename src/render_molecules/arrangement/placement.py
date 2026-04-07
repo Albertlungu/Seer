@@ -133,42 +133,37 @@ def build_spatial_grid(object_state: ObjectState) -> SpatialGrid:
     )
 
 
+@dataclass
 class PlacementConfig:
     """
     Dataclass that controls all aspects of molecule placement.
     Must be instantiated before calling place_molecules().
     """
 
-    seed: (
-        int | None
-    )  # Random seed for deterministic placement. Set to a fixed value for reproducible results
-    jitter_scale: (
-        float  # How much a candidate molecule is nudged randomly when sampling pos
-    )
+    seed: int | None = 0
+    jitter_scale: float = 0.0
 
-    max_seed_attempts: int  # num tries for placing the first molecule
-    max_candidate_attempts: (
-        int  # num tries to place one non-seed molecule before giving up
-    )
-    max_total_attempts: int
+    max_seed_attempts: int = 128
+    max_candidate_attempts: int = 128
+    max_total_attempts: int = 5000
 
-    overlap_safety_factor: float
-    min_center_distance: float | None
+    overlap_safety_factor: float = 1.0
+    min_center_distance: float | None = None
 
     use_frontier: bool = True
-    frontier_radius: float  # How close to an anchor to sample new candidates
-    frontier_max_rejections_per_anchor: int  # Count how many candidate placements fall near each anchor in the frontier  # If reached, stop using anchor or cool down (too crowded)
-    frontier_max_size: int
+    frontier_radius: float = 0.25
+    frontier_max_rejections_per_anchor: int = 32
+    frontier_max_size: int = 256
 
-    target_instance_count: int | None
-    stop_when_target_met: bool
+    target_instance_count: int | None = None
+    stop_when_target_met: bool = True
 
-    enable_relaxation: bool  # Off/on switch for post-placement cleanup
-    relaxation_passes: int  # How many cleanup rounds to run over placed molecules
-    relaxation_step_size: float  # Max translation move per cleanup step
-    relaxation_rotation_step: float  # Max rotation change per cleanup step
+    enable_relaxation: bool = False
+    relaxation_passes: int = 0
+    relaxation_step_size: float = 0.0
+    relaxation_rotation_step: float = 0.0
 
-    require_in_bounds: bool
+    require_in_bounds: bool = True
     require_no_overlap: bool = True
 
 
@@ -479,7 +474,6 @@ def place_molecules(
 
     # --- Main loop ---
     for _ in range(config.max_total_attempts):
-
         # Pick which molecule type to place next and which anchor to grow from
         next_template_id = schedule_next_molecule(
             target_counts=target_counts, placed_counts=placed_counts, rng=rng
