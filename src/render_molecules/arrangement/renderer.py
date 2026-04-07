@@ -268,9 +268,10 @@ def _create_density_cloud(
     radial_scale: float,
     alpha: float,
     color: tuple[float, float, float],
+    lobe_axis: np.ndarray | None = None,
 ) -> NodePath:
     """
-    Creates a density cloud for electron bonds.
+    Creates a sampled dot cloud from orbital-density formulas.
 
     Args:
         base (ShowBase): Panda3D Base app object
@@ -280,6 +281,8 @@ def _create_density_cloud(
         center_offset (Matrix3x1): Sigma has no offset (center on bond axis), Pi has +/- offsets for side lobes
         radial_scale (float): Thickness of cloud perpendicular to bond axis
         alpha (float): Transparency level
+        color (tuple[float, float, float]): RGB color for rendered dots.
+        lobe_axis (np.ndarray | None): If provided, uses a pi-like orbital term along this axis.
 
     Raises:
         RuntimeError: If the ShowBase loader is not initialized
@@ -290,24 +293,97 @@ def _create_density_cloud(
     if base.loader is None:
         raise RuntimeError("ShowBase loader is not initialized")
 
-    cloud = cast(NodePath, base.loader.loadModel("models/misc/sphere"))
-    cloud.reparentTo(parent)
-
     start_vec = np.asarray(start, dtype=float).reshape(3)
     end_vec = np.asarray(end, dtype=float).reshape(3)
     offset_vec = np.asarray(center_offset, dtype=float).reshape(3)
 
-    mid = ((start_vec + end_vec) * 0.5) + offset_vec
-    length = float(np.linalg.norm(end_vec - start_vec))
+    axis = end_vec - start_vec
+    length = float(np.linalg.norm(axis))
     if length < 1e-8:
         length = 1e-8
+    axis = axis / length
 
-    cloud.setPos(float(mid[0]), float(mid[1]), float(mid[2]))
-    cloud.lookAt(float(end_vec[0]), float(end_vec[1]), float(end_vec[2]))
-    cloud.setScale(radial_scale, length * 0.5, radial_scale)
+    mid = ((start_vec + end_vec) * 0.5) + offset_vec
+    u, v = _perpendicular_axes(axis)
 
-    cloud.setTransparency(TransparencyAttrib.MAlpha)
-    cloud.setColor(color[0], color[1], color[2], alpha)
+    seed_source = np.concatenate([start_vec, end_vec, offset_vec])
+    seed = int(np.sum(np.abs(seed_source) * 1_000_000.0)) % (2**32 - 1)
+    if seed == 0:
+        seed = 1
+    rng = np.random.default_rng(seed)
+
+    dot_count = max(120, min(380, int(160 + (780 * radial_scale) + (42 * length))))
+    dot_radius = max(0.003, radial_scale * 0.17)
+
+    cloud = parent.attachNewNode("density_cloud")
+    prototype = cast(NodePath, base.loader.loadModel("models/misc/sphere"))
+    prototype.reparentTo(cloud)
+    prototype.hide()
+
+    # sigma: psi = exp(-zeta*rA) + exp(-zeta*rB)
+    # pi:    psi = (n·(r-rA))*exp(-zeta*rA) + (n·(r-rB))*exp(-zeta*rB)
+    # density rho = |psi|^2
+    zeta = max(2.0 / max(length, 0.2), 1.25)
+    half_len = 0.5 * length
+    radial_extent = max(radial_scale * 4.5, 0.14)
+    along_extent = half_len + max(0.22 * length, 0.08)
+
+    candidate_count = dot_count * 9
+    candidates = np.empty((candidate_count, 3), dtype=float)
+    rho = np.zeros(candidate_count, dtype=float)
+
+    if lobe_axis is None:
+        orbital_axis = None
+    else:
+        orbital_axis = np.asarray(lobe_axis, dtype=float).reshape(3)
+        orbital_norm = float(np.linalg.norm(orbital_axis))
+        if orbital_norm < 1e-8:
+            orbital_axis = None
+        else:
+            orbital_axis = orbital_axis / orbital_norm
+
+    for i in range(candidate_count):
+        along = rng.uniform(-along_extent, along_extent)
+        off_u = rng.uniform(-radial_extent, radial_extent)
+        off_v = rng.uniform(-radial_extent, radial_extent)
+        point = mid + (axis * along) + (u * off_u) + (v * off_v)
+        candidates[i] = point
+
+        r_a_vec = point - start_vec
+        r_b_vec = point - end_vec
+        r_a = float(np.linalg.norm(r_a_vec))
+        r_b = float(np.linalg.norm(r_b_vec))
+
+        phi_a = np.exp(-zeta * r_a)
+        phi_b = np.exp(-zeta * r_b)
+
+        if orbital_axis is None:
+            psi = phi_a + phi_b
+        else:
+            psi = (
+                float(np.dot(orbital_axis, r_a_vec)) * phi_a
+                + float(np.dot(orbital_axis, r_b_vec)) * phi_b
+            )
+
+        rho[i] = psi * psi
+
+    rho_sum = float(np.sum(rho))
+    if rho_sum <= 1e-20:
+        weights = np.full(candidate_count, 1.0 / candidate_count)
+    else:
+        weights = rho / rho_sum
+
+    chosen = rng.choice(candidate_count, size=dot_count, replace=True, p=weights)
+    for idx in chosen:
+        point = candidates[int(idx)]
+        dot = prototype.copyTo(cloud)
+        dot.show()
+        dot.setPos(float(point[0]), float(point[1]), float(point[2]))
+        dot.setScale(dot_radius)
+        dot.setTransparency(TransparencyAttrib.MAlpha)
+        dot.setColor(color[0], color[1], color[2], alpha)
+
+    prototype.removeNode()
     return cloud
 
 
@@ -373,6 +449,7 @@ def create_sigma_bond_cloud(
         radial_scale=sigma_radius,
         alpha=0.45,
         color=(0.72, 0.72, 0.72),
+        lobe_axis=None,
     )
 
 
@@ -406,6 +483,7 @@ def create_pi_bond_cloud(
         radial_scale=0.035,
         alpha=0.38,
         color=(0.42, 0.66, 1.0),
+        lobe_axis=offset_axis,
     )
     neg_lobe = _create_density_cloud(
         base=base,
@@ -416,6 +494,7 @@ def create_pi_bond_cloud(
         radial_scale=0.035,
         alpha=0.38,
         color=(0.42, 0.66, 1.0),
+        lobe_axis=offset_axis,
     )
     return pos_lobe, neg_lobe
 
