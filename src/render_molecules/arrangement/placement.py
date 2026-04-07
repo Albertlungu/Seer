@@ -174,7 +174,7 @@ class PlacementConfig:
 
 def create_instance(
     template_id: int,
-    template: MoleculeTemplate,
+    object_state: ObjectState,
     instance_id: int,
     position: Matrix3x1,
     rotation: Matrix3x3,
@@ -185,7 +185,7 @@ def create_instance(
 
     Args:
         template_id (int): Unique template ID
-        template (MoleculeTemplate): Molecule template used for COM correction
+        object_state (ObjectState): Scene state used to look up the template for COM correction
         instance_id (int): Unique instance ID
         position (np.ndarray): Desired world-space COM position vector
         rotation (np.ndarray): Rotation matrix
@@ -203,6 +203,7 @@ def create_instance(
     if rotation.shape != (3, 3):
         raise ValueError("Rotation must be of shape (3, 3)")
 
+    template = object_state.templates[template_id]
     local_com = calculate_center_of_mass(template=template)
     translation = position - (rotation @ local_com)
 
@@ -271,7 +272,7 @@ def place_seed_instance(
     instance_id = 0
     return create_instance(
         template_id=template_id,
-        template=template,
+        object_state=object_state,
         instance_id=instance_id,
         position=object_center,
         rotation=rotation_matrix,
@@ -306,7 +307,6 @@ def sample_candidate_pose(
 def check_placement(
     candidate_position: np.ndarray,
     candidate_rotation: np.ndarray,
-    template: MoleculeTemplate,
     template_id: int,
     object_state: ObjectState,
     config: PlacementConfig,
@@ -319,7 +319,6 @@ def check_placement(
     Args:
         candidate_position (np.ndarray): Candidate world-space COM position, shape (3,).
         candidate_rotation (np.ndarray): Candidate rotation matrix, shape (3, 3).
-        template (MoleculeTemplate): Template of the molecule being placed.
         template_id (int): ID of the template in object_state.templates.
         object_state (ObjectState): Current scene state.
         config (PlacementConfig): Placement configuration.
@@ -328,6 +327,8 @@ def check_placement(
     Returns:
         bool: True if the placement is valid, False if rejected.
     """
+    template = object_state.templates[template_id]
+
     if config.require_in_bounds:
         all_corners = np.vstack([object_state.box_bottom, object_state.box_top])
         min_corner = np.min(all_corners, axis=0)
@@ -338,7 +339,7 @@ def check_placement(
     if config.require_no_overlap:
         candidate = create_instance(
             template_id=template_id,
-            template=template,
+            object_state=object_state,
             instance_id=-1,  # Temporary; not registered in object_state
             position=candidate_position,
             rotation=candidate_rotation,
@@ -356,3 +357,181 @@ def check_placement(
 
     return True
 
+
+def select_next_anchor(
+    active_frontier: dict[int, int],
+    config: PlacementConfig,
+    rng: np.random.Generator,
+) -> int:
+    """
+    Selects the next anchor from the active frontier.
+    Filters out anchors that have hit their rejection limit, then picks randomly among the remaining candidates.
+
+    Args:
+        active_frontier (dict[int, int]): Maps instance ID to its rejection count.
+        config (PlacementConfig): Placement configuration.
+        rng (np.random.Generator): PRNG generator instance
+
+    Raises:
+        ValueError: If there are no more valid anchors in the frontier.
+
+    Returns:
+        int: Instance ID of the selected anchor
+    """
+    valid = [
+        instance_id
+        for instance_id, rejections in active_frontier.items()
+        if rejections < config.frontier_max_rejections_per_anchor
+    ]
+    if not valid:
+        raise ValueError("No valid anchors")
+    return int(rng.choice(valid))
+
+
+def schedule_next_molecule(
+    target_counts: dict[int, int],
+    placed_counts: dict[int, int],
+    rng: np.random.Generator,
+) -> int:
+    """
+    Selects which template to place next based on how far each template is from its target count.
+    Templates furthest behind from their target counts are preferred.
+
+    Args:
+        target_counts (dict[int, int]): Maps template ID to target instance count.
+        placed_counts (dict[int, int]): Maps template ID to currently placed count.
+        rng (np.random.Generator): PRNG generator instance.
+
+    Raises:
+        ValueError: If all templates have met their target
+
+    Returns:
+        int: Template ID of next molecule to place.
+    """
+    deficit = {
+        template_id: target_counts[template_id] - placed_counts.get(template_id, 0)
+        for template_id in target_counts
+    }
+    remaining = {tid: d for tid, d in deficit.items() if d > 0}
+    if not remaining:
+        raise ValueError("All templates have met target counts")
+
+    total = sum(remaining.values())
+    weights = [remaining[tid] / total for tid in remaining]
+    return int(rng.choice(list(remaining.keys()), p=weights))
+
+
+def relax_overlaps():  # Stub for now
+    pass
+
+
+def place_molecules(
+    object_state: ObjectState,
+    config: PlacementConfig,
+    target_counts: dict[int, int],
+) -> ObjectState:
+    """
+    Main loop for placing molecules.
+
+    Args:
+        object_state (ObjectState): The object state container with templates and instances.
+        config (PlacementConfig): The placement configuration.
+        target_counts (dict[int, int]): Number of targets.
+
+    Raises:
+        ValueError: If the templates list in ObjectState is empty.
+
+    Returns:
+        ObjectState: The final object state, with the modified instances appended.
+    """
+
+    # --- Creation of persistent variables ---
+
+    rng = np.random.default_rng(seed=config.seed)
+    grid = build_spatial_grid(object_state=object_state)
+    active_frontier: dict[int, int] = {}  # Instance id: rejection count
+    placed_counts: dict[int, int] = {
+        template_id: 0 for template_id in target_counts.keys()
+    }
+    next_instance_id = 1
+
+    if not object_state.templates:
+        raise ValueError("No templates available for placement")
+
+    # --- Placement of seed template ---
+
+    initial_template_id = schedule_next_molecule(
+        target_counts=target_counts, placed_counts=placed_counts, rng=rng
+    )
+    initial_template = object_state.templates[initial_template_id]
+
+    seed_instance = place_seed_instance(
+        object_state=object_state,
+        template=initial_template,
+        rng=rng,
+    )
+    object_state.instances[0] = seed_instance
+
+    active_frontier[0] = (
+        0  # Adds seed instance to active frontier with rejection count zero
+    )
+    placed_counts[initial_template_id] += 1
+
+    # --- Main loop ---
+    for _ in range(config.max_total_attempts):
+
+        # Pick which molecule type to place next and which anchor to grow from
+        next_template_id = schedule_next_molecule(
+            target_counts=target_counts, placed_counts=placed_counts, rng=rng
+        )
+        next_anchor_instance_id = select_next_anchor(
+            active_frontier=active_frontier, config=config, rng=rng
+        )
+
+        # Sample a candidate position and rotation near the chosen anchor
+        candidate_position, candidate_rotation = sample_candidate_pose(
+            anchor_instance=object_state.instances[next_anchor_instance_id],
+            frontier_radius=config.frontier_radius,
+            rng=rng,
+        )
+
+        if check_placement(
+            candidate_position=candidate_position,
+            candidate_rotation=candidate_rotation,
+            template_id=next_template_id,
+            object_state=object_state,
+            config=config,
+            grid=grid,
+        ):
+            # Placement accepted: register the new instance
+            new_instance = create_instance(
+                template_id=next_template_id,
+                object_state=object_state,
+                instance_id=next_instance_id,
+                position=candidate_position,
+                rotation=candidate_rotation,
+            )
+            object_state.instances[next_instance_id] = new_instance
+            grid.insert(instance_id=next_instance_id, position=candidate_position)
+
+            # Add to frontier and trim if over the size limit
+            active_frontier[next_instance_id] = 0
+            if len(active_frontier) > config.frontier_max_size:
+                worst = max(active_frontier, key=lambda iid: active_frontier[iid])
+                del active_frontier[worst]
+
+            placed_counts[next_template_id] += 1
+            next_instance_id += 1
+
+            # Stop early if all targets are met
+            if all(placed_counts[tid] >= target_counts[tid] for tid in target_counts):
+                break
+
+        else:
+            # Placement rejected: penalize the anchor that was tried
+            active_frontier[next_anchor_instance_id] += 1
+
+    if config.enable_relaxation:
+        relax_overlaps()
+
+    return object_state
