@@ -11,7 +11,7 @@ from typing import cast
 
 import numpy as np
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import Mat4, NodePath
+from panda3d.core import Mat4, NodePath, TransparencyAttrib
 
 from src.render_molecules.arrangement.scene_state import (
     MoleculeInstance,
@@ -190,3 +190,99 @@ def sync_scene_render(
         )
 
     return instance_roots
+
+
+def bond_order_to_vis(bond_order: int) -> tuple[int, int]:
+    """
+    Maps bond order to visual component counts. Does not account for delta bonds.
+
+    Args:
+        bond_order (int): The bond order.
+
+    Returns:
+        tuple[int, int]: number of sigma bonds, number of pi bonds
+    """
+    if bond_order <= 1:
+        return 1, 0
+    if bond_order == 2:
+        return 1, 1
+    return 1, 2
+
+
+def _create_density_cloud(
+    base: ShowBase,
+    parent: NodePath,
+    start: Matrix3x1,
+    end: Matrix3x1,
+    center_offset: Matrix3x1,
+    radial_scale: float,
+    alpha: float,
+    color: tuple[float, float, float],
+) -> NodePath:
+    """
+    Creates a density cloud for electron bonds.
+
+    Args:
+        base (ShowBase): Panda3D Base app object
+        parent (NodePath): Node parent
+        start (Matrix3x1): Starting point (one atom)
+        end (Matrix3x1): Ending point (the other atom)
+        center_offset (Matrix3x1): Sigma has no offset (center on bond axis), Pi has +/- offsets for side lobes
+        radial_scale (float): Thickness of cloud perpendicular to bond axis
+        alpha (float): Transparency level
+
+    Raises:
+        RuntimeError: If the ShowBase loader is not initialized
+
+    Returns:
+        NodePath: The electron cloud
+    """
+    if base.loader is None:
+        raise RuntimeError("ShowBase loader is not initialized")
+
+    cloud = cast(NodePath, base.loader.loadModel("models/misc/sphere"))
+    cloud.reparentTo(parent)
+
+    mid = ((start + end) * 0.5) + center_offset
+    length = float(np.linalg.norm(end - start))
+    if length < 1e-8:
+        length = 1e-8
+
+    cloud.setPos(float(mid[0]), float(mid[1]), float(mid[2]))
+    cloud.lookAt(float(end), float(end), float(end[2]))
+    cloud.setScale(radial_scale, length * 0.5, radial_scale)
+
+    cloud.setTransparency(TransparencyAttrib.MAlpha)
+    cloud.setColor(color[0], color[1], color[2], alpha)
+
+
+def _perpendicular_axes(unit_axis: Matrix3x1) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Takes the bond axis direction vector, picks a reference vector that is not parallel, builds a
+    vector (u) to be perpendicular to bond axis, and another (v) perpendicular to bond axis and u
+
+    Args:
+        unit_axis (Matrix3x1): The vector representing the bond axis
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Tuple containing both perpendicular vectors.
+    """
+    ref = np.asarray([0.0, 0.0, 1.0])
+    if abs(float(np.dot(unit_axis, ref))) > 0.95:
+        ref = np.array([0.0, 1.0, 0.0])
+
+    u = np.cross(unit_axis, ref)
+    u_norm = float(np.linalg.norm(u))
+    if u_norm < 1e-8:
+        u = np.array([1.0, 0.0, 0.0])
+        u_norm = 1.0
+    u /= u_norm
+
+    v = np.cross(unit_axis, u)
+    v_norm = float(np.linalg.norm(v))
+    if v_norm < 1e-8:
+        v = np.array([0.0, 1.0, 0.0])
+        v_norm = 1.0
+    v /= v_norm
+
+    return u, v
