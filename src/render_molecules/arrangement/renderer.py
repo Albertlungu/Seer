@@ -11,7 +11,17 @@ from typing import cast
 
 import numpy as np
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import Mat4, NodePath, TransparencyAttrib
+from panda3d.core import (
+    Geom,
+    GeomNode,
+    GeomPoints,
+    GeomVertexData,
+    GeomVertexFormat,
+    GeomVertexWriter,
+    Mat4,
+    NodePath,
+    TransparencyAttrib,
+)
 
 from src.render_molecules.arrangement.scene_state import (
     MoleculeInstance,
@@ -25,6 +35,8 @@ from src.utils.constants import (
     ELEMENT_RADII,
 )
 from src.utils.type_annotations import Matrix3x1, Matrix3x3
+
+_DENSITY_NODE_CACHE: dict[tuple, GeomNode] = {}
 
 
 def create_atom_sphere(
@@ -290,9 +302,6 @@ def _create_density_cloud(
     Returns:
         NodePath: The electron cloud
     """
-    if base.loader is None:
-        raise RuntimeError("ShowBase loader is not initialized")
-
     start_vec = np.asarray(start, dtype=float).reshape(3)
     end_vec = np.asarray(end, dtype=float).reshape(3)
     offset_vec = np.asarray(center_offset, dtype=float).reshape(3)
@@ -310,15 +319,34 @@ def _create_density_cloud(
     seed = int(np.sum(np.abs(seed_source) * 1_000_000.0)) % (2**32 - 1)
     if seed == 0:
         seed = 1
-    rng = np.random.default_rng(seed)
 
     dot_count = max(120, min(380, int(160 + (780 * radial_scale) + (42 * length))))
     dot_radius = max(0.003, radial_scale * 0.17)
 
-    cloud = parent.attachNewNode("density_cloud")
-    prototype = cast(NodePath, base.loader.loadModel("models/misc/sphere"))
-    prototype.reparentTo(cloud)
-    prototype.hide()
+    lobe_key = (
+        None
+        if lobe_axis is None
+        else tuple(np.round(np.asarray(lobe_axis, dtype=float).reshape(3), 5))
+    )
+    cache_key = (
+        tuple(np.round(start_vec, 5)),
+        tuple(np.round(end_vec, 5)),
+        tuple(np.round(offset_vec, 5)),
+        round(radial_scale, 5),
+        round(alpha, 5),
+        tuple(round(c, 5) for c in color),
+        lobe_key,
+        dot_count,
+    )
+
+    if cache_key in _DENSITY_NODE_CACHE:
+        cloud = NodePath(_DENSITY_NODE_CACHE[cache_key]).copyTo(parent)
+        cloud.setRenderModeThickness(max(1.0, dot_radius * 120.0))
+        cloud.setTransparency(TransparencyAttrib.MAlpha)
+        cloud.setDepthWrite(False)
+        return cloud
+
+    rng = np.random.default_rng(seed)
 
     # sigma: psi = exp(-zeta*rA) + exp(-zeta*rB)
     # pi:    psi = (n·(r-rA))*exp(-zeta*rA) + (n·(r-rB))*exp(-zeta*rB)
@@ -329,8 +357,6 @@ def _create_density_cloud(
     along_extent = half_len + max(0.22 * length, 0.08)
 
     candidate_count = dot_count * 9
-    candidates = np.empty((candidate_count, 3), dtype=float)
-    rho = np.zeros(candidate_count, dtype=float)
 
     if lobe_axis is None:
         orbital_axis = None
@@ -342,30 +368,29 @@ def _create_density_cloud(
         else:
             orbital_axis = orbital_axis / orbital_norm
 
-    for i in range(candidate_count):
-        along = rng.uniform(-along_extent, along_extent)
-        off_u = rng.uniform(-radial_extent, radial_extent)
-        off_v = rng.uniform(-radial_extent, radial_extent)
-        point = mid + (axis * along) + (u * off_u) + (v * off_v)
-        candidates[i] = point
+    along = rng.uniform(-along_extent, along_extent, size=candidate_count)
+    off_u = rng.uniform(-radial_extent, radial_extent, size=candidate_count)
+    off_v = rng.uniform(-radial_extent, radial_extent, size=candidate_count)
+    candidates = (
+        mid[None, :]
+        + along[:, None] * axis[None, :]
+        + off_u[:, None] * u[None, :]
+        + off_v[:, None] * v[None, :]
+    )
 
-        r_a_vec = point - start_vec
-        r_b_vec = point - end_vec
-        r_a = float(np.linalg.norm(r_a_vec))
-        r_b = float(np.linalg.norm(r_b_vec))
+    r_a_vec = candidates - start_vec[None, :]
+    r_b_vec = candidates - end_vec[None, :]
+    r_a = np.linalg.norm(r_a_vec, axis=1)
+    r_b = np.linalg.norm(r_b_vec, axis=1)
+    phi_a = np.exp(-zeta * r_a)
+    phi_b = np.exp(-zeta * r_b)
 
-        phi_a = np.exp(-zeta * r_a)
-        phi_b = np.exp(-zeta * r_b)
+    if orbital_axis is None:
+        psi = phi_a + phi_b
+    else:
+        psi = (r_a_vec @ orbital_axis) * phi_a + (r_b_vec @ orbital_axis) * phi_b
 
-        if orbital_axis is None:
-            psi = phi_a + phi_b
-        else:
-            psi = (
-                float(np.dot(orbital_axis, r_a_vec)) * phi_a
-                + float(np.dot(orbital_axis, r_b_vec)) * phi_b
-            )
-
-        rho[i] = psi * psi
+    rho = psi * psi
 
     rho_sum = float(np.sum(rho))
     if rho_sum <= 1e-20:
@@ -374,16 +399,33 @@ def _create_density_cloud(
         weights = rho / rho_sum
 
     chosen = rng.choice(candidate_count, size=dot_count, replace=True, p=weights)
-    for idx in chosen:
-        point = candidates[int(idx)]
-        dot = prototype.copyTo(cloud)
-        dot.show()
-        dot.setPos(float(point[0]), float(point[1]), float(point[2]))
-        dot.setScale(dot_radius)
-        dot.setTransparency(TransparencyAttrib.MAlpha)
-        dot.setColor(color[0], color[1], color[2], alpha)
+    points = candidates[chosen]
 
-    prototype.removeNode()
+    fmt = GeomVertexFormat.getV3c4()
+    vdata = GeomVertexData("density_points", fmt, Geom.UHStatic)
+    vdata.setNumRows(dot_count)
+    vertex_writer = GeomVertexWriter(vdata, "vertex")
+    color_writer = GeomVertexWriter(vdata, "color")
+
+    for point in points:
+        vertex_writer.addData3f(float(point[0]), float(point[1]), float(point[2]))
+        color_writer.addData4f(color[0], color[1], color[2], alpha)
+
+    prim = GeomPoints(Geom.UHStatic)
+    for i in range(dot_count):
+        prim.addVertex(i)
+    prim.closePrimitive()
+
+    geom = Geom(vdata)
+    geom.addPrimitive(prim)
+    node = GeomNode("density_points")
+    node.addGeom(geom)
+    _DENSITY_NODE_CACHE[cache_key] = node
+
+    cloud = NodePath(node).copyTo(parent)
+    cloud.setRenderModeThickness(max(1.0, dot_radius * 120.0))
+    cloud.setTransparency(TransparencyAttrib.MAlpha)
+    cloud.setDepthWrite(False)
     return cloud
 
 
