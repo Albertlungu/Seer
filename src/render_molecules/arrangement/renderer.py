@@ -286,3 +286,132 @@ def _perpendicular_axes(unit_axis: Matrix3x1) -> tuple[np.ndarray, np.ndarray]:
     v /= v_norm
 
     return u, v
+
+
+def create_sigma_bond_cloud(
+    base: ShowBase,
+    parent: NodePath,
+    atom_a: np.ndarray,
+    atom_b: np.ndarray,
+    bond_order: int,
+) -> NodePath:
+    """
+    Creates one sigma bond cloud aligned with the bond axis.
+
+    Args:
+        base (ShowBase): Panda3D Base app object.
+        parent (NodePath): Node parent.
+        atom_a (np.ndarray): Coordinates of first atom in local molecule space.
+        atom_b (np.ndarray): Coordinates of second atom in local molecule space.
+        bond_order (int): Bond order used to scale sigma cloud thickness.
+
+    Returns:
+        NodePath: The sigma electron-density cloud node.
+    """
+    sigma_radius = 0.05 + (0.01 * max(0, bond_order - 1))
+    return _create_density_cloud(
+        base=base,
+        parent=parent,
+        start=atom_a,
+        end=atom_b,
+        center_offset=np.zeros(3, dtype=float),
+        radial_scale=sigma_radius,
+        alpha=0.45,
+        color=(0.72, 0.72, 0.72),
+    )
+
+
+def create_pi_bond_cloud(
+    base: ShowBase,
+    parent: NodePath,
+    atom_a: np.ndarray,
+    atom_b: np.ndarray,
+    offset_axis: np.ndarray,
+) -> tuple[NodePath, NodePath]:
+    """
+    Creates the two opposite lobes for one pi bond component.
+
+    Args:
+        base (ShowBase): Panda3D Base app object.
+        parent (NodePath): Node parent.
+        atom_a (np.ndarray): Coordinates of first atom in local molecule space.
+        atom_b (np.ndarray): Coordinates of second atom in local molecule space.
+        offset_axis (np.ndarray): Unit axis perpendicular to the bond axis used for lobe offsets.
+
+    Returns:
+        tuple[NodePath, NodePath]: Positive and negative pi lobe nodes.
+    """
+    lobe_offset = np.asarray(offset_axis, dtype=float).reshape(3) * 0.12
+    pos_lobe = _create_density_cloud(
+        base=base,
+        parent=parent,
+        start=atom_a,
+        end=atom_b,
+        center_offset=lobe_offset,
+        radial_scale=0.035,
+        alpha=0.38,
+        color=(0.42, 0.66, 1.0),
+    )
+    neg_lobe = _create_density_cloud(
+        base=base,
+        parent=parent,
+        start=atom_a,
+        end=atom_b,
+        center_offset=-lobe_offset,
+        radial_scale=0.035,
+        alpha=0.38,
+        color=(0.42, 0.66, 1.0),
+    )
+    return pos_lobe, neg_lobe
+
+
+def create_bond_visual(
+    base: ShowBase,
+    parent: NodePath,
+    atom_a: np.ndarray,
+    atom_b: np.ndarray,
+    bond_order: int,
+) -> list[NodePath]:
+    """
+    Creates all bond cloud nodes for a bond using sigma and pi components.
+
+    Args:
+        base (ShowBase): Panda3D Base app object.
+        parent (NodePath): Node parent.
+        atom_a (np.ndarray): Coordinates of first atom in local molecule space.
+        atom_b (np.ndarray): Coordinates of second atom in local molecule space.
+        bond_order (int): Bond order used to determine sigma/pi components.
+
+    Returns:
+        list[NodePath]: All created cloud nodes for the bond.
+    """
+    visuals: list[NodePath] = []
+    sigma_count, pi_count = bond_order_to_vis(int(bond_order))
+
+    if sigma_count:
+        visuals.append(
+            create_sigma_bond_cloud(
+                base=base,
+                parent=parent,
+                atom_a=atom_a,
+                atom_b=atom_b,
+                bond_order=int(bond_order),
+            )
+        )
+
+    axis = np.asarray(atom_b, dtype=float).reshape(3) - np.asarray(
+        atom_a, dtype=float
+    ).reshape(3)
+    norm = float(np.linalg.norm(axis))
+    if norm < 1e-8:
+        return visuals
+
+    axis = axis / norm
+    u, v = _perpendicular_axes(axis)
+
+    if pi_count >= 1:
+        visuals.extend(create_pi_bond_cloud(base, parent, atom_a, atom_b, u))
+    if pi_count >= 2:
+        visuals.extend(create_pi_bond_cloud(base, parent, atom_a, atom_b, v))
+
+    return visuals
