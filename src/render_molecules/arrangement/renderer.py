@@ -125,8 +125,31 @@ def build_instance_root(
         NodePath: The molecule
     """
     root = parent.attachNewNode(f"molecule_{instance.id}")
+    local_coords = np.column_stack(template.local_xyz)
+    aid_to_index = {int(aid): idx for idx, aid in enumerate(template.aids)}
+
     for aid in template.aids:
         create_atom_sphere(base=base, parent=root, template=template, aid=int(aid))
+
+    for aid1, aid2, order in zip(
+        template.bonds_aid1,
+        template.bonds_aid2,
+        template.bond_order,
+    ):
+        idx1 = aid_to_index.get(int(aid1))
+        idx2 = aid_to_index.get(int(aid2))
+        if idx1 is None or idx2 is None:
+            continue
+
+        atom_a = local_coords[idx1]
+        atom_b = local_coords[idx2]
+        create_bond_visual(
+            base=base,
+            parent=root,
+            atom_a=atom_a,
+            atom_b=atom_b,
+            bond_order=int(order),
+        )
 
     root.setMat(_pose_to_mat4(instance.rotation, instance.position))
     return root
