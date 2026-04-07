@@ -160,7 +160,17 @@ def render_object_state(
     parent: NodePath,
     object_state: ObjectState,
 ) -> dict[int, NodePath]:
-    """Build render nodes for all placed instances in an object state."""
+    """
+    Builds render nodes for all placed instances in one object state.
+
+    Args:
+        base (ShowBase): Panda3D base app object.
+        parent (NodePath): Scene-graph parent for all molecule roots.
+        object_state (ObjectState): Current arranged object state.
+
+    Returns:
+        dict[int, NodePath]: Mapping from instance ID to molecule root node.
+    """
     instance_roots: dict[int, NodePath] = {}
     for instance_id, instance in object_state.instances.items():
         template = object_state.templates[instance.template_id]
@@ -177,7 +187,13 @@ def clear_removed_instance(
     instance_roots: dict[int, NodePath],
     instance_id: int,
 ) -> None:
-    """Remove one rendered molecule instance by id."""
+    """
+    Removes one rendered molecule instance by ID.
+
+    Args:
+        instance_roots (dict[int, NodePath]): Cache of rendered instance roots.
+        instance_id (int): Instance ID to remove.
+    """
     root = instance_roots.pop(instance_id, None)
     if root is not None:
         root.removeNode()
@@ -189,7 +205,18 @@ def sync_scene_render(
     object_state: ObjectState,
     instance_roots: dict[int, NodePath],
 ) -> dict[int, NodePath]:
-    """Update/add/remove molecule roots to match the current object state."""
+    """
+    Synchronizes render nodes with the current object state.
+
+    Args:
+        base (ShowBase): Panda3D base app object.
+        parent (NodePath): Scene-graph parent for all molecule roots.
+        object_state (ObjectState): Current arranged object state.
+        instance_roots (dict[int, NodePath]): Existing cache of rendered roots.
+
+    Returns:
+        dict[int, NodePath]: Updated mapping from instance ID to molecule root node.
+    """
     live_ids = set(object_state.instances.keys())
     cached_ids = set(instance_roots.keys())
 

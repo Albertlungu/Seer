@@ -6,17 +6,6 @@ python -m src.render_molecules.arrange_molecules
 Arrangement pipeline entrypoint module.
 
 Serves as the top-level orchestration script for building realistic static molecular arrangements from aggregated JSON input.
-
-- Load composition and molecular conformer data from project JSON sources.
-- Construct template/state records for arrangement processing.
-- Invoke placement and optional static relaxation routines.
-- Hand arranged scene-state data to the renderer adapter for Panda3D visualization.
-
-- Replace exploratory simulation script usage with a production-oriented arrangement entrypoint.
-- Keep orchestration logic thin and delegate details to state, geometry, placement, and renderer modules.
-- Main application class or runner function.
-- Configuration loading for box bounds, composition counts, seeds, and packing settings.
-- Startup and shutdown wiring for Panda3D scene lifecycle.
 """
 
 import argparse
@@ -24,6 +13,7 @@ import argparse
 import numpy as np
 from direct.showbase.ShowBase import ShowBase
 
+from src.render_molecules.arrangement.geometry import calculate_center_of_mass
 from src.render_molecules.arrangement.placement import PlacementConfig, place_molecules
 from src.render_molecules.arrangement.renderer import render_object_state
 from src.render_molecules.arrangement.scene_state import (
@@ -42,6 +32,15 @@ from src.utils.type_annotations import (
 
 
 def _extract_target_count(molecule_details: dict) -> int:
+    """
+    Extracts target copy count for one molecule entry.
+
+    Args:
+        molecule_details (dict): Composition entry for one molecule.
+
+    Returns:
+        int: Requested count if present, otherwise 1.
+    """
     for key in ("count", "quantity", "target_count", "instances", "copies"):
         value = molecule_details.get(key)
         if isinstance(value, int) and value > 0:
@@ -52,6 +51,18 @@ def _extract_target_count(molecule_details: dict) -> int:
 def build_object_state(
     object_key: str | None = None,
 ) -> tuple[ObjectState, dict[int, int]]:
+    """
+    Builds an ObjectState and per-template target counts from aggregated input.
+
+    Args:
+        object_key (str | None): Optional object key to load. If None, uses first object.
+
+    Raises:
+        ValueError: If aggregated input is empty, key is missing, or sim_details is incomplete.
+
+    Returns:
+        tuple[ObjectState, dict[int, int]]: Scene state and target counts by template ID.
+    """
     data = load_json(FINAL_AGGREGATED)
     if not data:
         raise ValueError("No objects found in aggregated input")
@@ -116,6 +127,16 @@ def build_object_state(
 def _default_placement_config(
     seed: int, target_counts: dict[int, int]
 ) -> PlacementConfig:
+    """
+    Creates the default placement configuration for full-object rendering.
+
+    Args:
+        seed (int): Random seed used by placement.
+        target_counts (dict[int, int]): Target counts by template ID.
+
+    Returns:
+        PlacementConfig: Placement configuration instance.
+    """
     target_total = int(sum(target_counts.values()))
     return PlacementConfig(
         seed=seed,
@@ -128,14 +149,62 @@ def _default_placement_config(
     )
 
 
+def _initial_camera_pose(object_state: ObjectState) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Computes initial camera focus and position for first frame.
+
+    Args:
+        object_state (ObjectState): Arranged object state.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Focus point and camera position vectors.
+    """
+    corners = np.vstack([object_state.box_bottom, object_state.box_top])
+    min_corner = np.min(corners, axis=0)
+    max_corner = np.max(corners, axis=0)
+    box_center = (min_corner + max_corner) * 0.5
+    extent = float(np.linalg.norm(max_corner - min_corner))
+
+    if not object_state.instances:
+        focus = box_center
+    else:
+        centers: list[np.ndarray] = []
+        for instance in object_state.instances.values():
+            template = object_state.templates[instance.template_id]
+            local_com = calculate_center_of_mass(template)
+            world_com = (instance.rotation @ local_com) + instance.position
+            centers.append(np.asarray(world_com, dtype=float).reshape(3))
+        focus = np.mean(np.vstack(centers), axis=0)
+
+    cam_distance = max(4.0, extent * 1.8)
+    cam_height = max(1.5, extent * 0.6)
+    camera_pos = np.array(
+        [focus[0], focus[1] - cam_distance, focus[2] + cam_height],
+        dtype=float,
+    )
+    return focus, camera_pos
+
+
 class ArrangementApp(ShowBase):
+    """Panda3D app that renders one arranged object state."""
+
     def __init__(self, object_state: ObjectState) -> None:
+        """
+        Initializes the Panda3D app and renders the arranged object.
+
+        Args:
+            object_state (ObjectState): Arranged object state to render.
+        """
         super().__init__()
-        self.disableMouse()
         self.setBackgroundColor(0.08, 0.08, 0.1, 1.0)
+        focus, camera_pos = _initial_camera_pose(object_state)
         if self.camera is not None:
-            self.camera.setPos(0.0, -8.0, 2.5)
-            self.camera.lookAt(0.0, 0.0, 0.0)
+            self.camera.setPos(
+                float(camera_pos[0]),
+                float(camera_pos[1]),
+                float(camera_pos[2]),
+            )
+            self.camera.lookAt(float(focus[0]), float(focus[1]), float(focus[2]))
         self.rendered_roots = render_object_state(
             base=self,
             parent=self.render,
@@ -144,6 +213,7 @@ class ArrangementApp(ShowBase):
 
 
 def main() -> None:
+    """Parses CLI args, arranges molecules, and launches the renderer."""
     parser = argparse.ArgumentParser(description="Arrange and render one full object")
     parser.add_argument(
         "--object-key",
