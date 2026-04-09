@@ -276,14 +276,19 @@ def place_seed_instance(
 
 
 def sample_candidate_pose(
-    anchor_instance: MoleculeInstance, frontier_radius: float, rng: np.random.Generator
+    anchor_world_com: Matrix3x1,
+    frontier_radius: float,
+    min_distance: float,
+    rng: np.random.Generator,
 ) -> tuple[Matrix3x1, Matrix3x3]:
     """
-    Decides where to put a new molecule. Generates a random position somewhere in the frontier radius with a random rotation.
+    Decides where to put a new molecule. Generates a random position between min_distance and
+    frontier_radius of the anchor COM, with a random rotation.
 
     Args:
-        anchor_instance (MoleculeInstance): The frontier from which to sample.
-        frontier_radius (float): Radius from CoM of anchor instance in which the new molecule will be sampled.
+        anchor_world_com (Matrix3x1): World-space center of mass of the anchor instance, shape (3,).
+        frontier_radius (float): Maximum COM-to-COM distance from anchor at which the new molecule may be placed.
+        min_distance (float): Minimum COM-to-COM distance from anchor. Should be at least the sum of both bounding sphere radii.
         rng (np.random.Generator): PRNG generator instance
 
     Returns:
@@ -291,10 +296,11 @@ def sample_candidate_pose(
     """
     direction = rng.standard_normal(3)
     direction /= np.linalg.norm(direction)
-    distance = rng.uniform(0.0, frontier_radius)
+    lo = min(min_distance, frontier_radius)
+    distance = rng.uniform(lo, frontier_radius)
     delta = direction * distance
 
-    position = anchor_instance.position + delta
+    position = anchor_world_com + delta
 
     return position, sample_random_rotation(rng=rng)
 
@@ -482,10 +488,18 @@ def place_molecules(
             active_frontier=active_frontier, config=config, rng=rng
         )
 
-        # Sample a candidate position and rotation near the chosen anchor
+        # Sample a candidate position and rotation near the chosen anchor's world COM.
+        # instance.position is the rigid-body translation vector, not the COM, so we
+        # reconstruct the COM explicitly before sampling.
+        anchor_instance = object_state.instances[next_anchor_instance_id]
+        anchor_template = object_state.templates[anchor_instance.template_id]
+        anchor_local_com = calculate_center_of_mass(anchor_template)
+        anchor_world_com = (anchor_instance.rotation @ anchor_local_com) + anchor_instance.position
+
         candidate_position, candidate_rotation = sample_candidate_pose(
-            anchor_instance=object_state.instances[next_anchor_instance_id],
+            anchor_world_com=anchor_world_com,
             frontier_radius=config.frontier_radius,
+            min_distance=config.min_center_distance or 0.0,
             rng=rng,
         )
 

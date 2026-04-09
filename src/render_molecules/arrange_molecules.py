@@ -13,7 +13,10 @@ import argparse
 import numpy as np
 from direct.showbase.ShowBase import ShowBase
 
-from src.render_molecules.arrangement.geometry import calculate_center_of_mass
+from src.render_molecules.arrangement.geometry import (
+    calculate_center_of_mass,
+    compute_bounding_sphere_radius,
+)
 from src.render_molecules.arrangement.placement import PlacementConfig, place_molecules
 from src.render_molecules.arrangement.renderer import render_object_state
 from src.render_molecules.arrangement.scene_state import (
@@ -125,7 +128,7 @@ def build_object_state(
 
 
 def _default_placement_config(
-    seed: int, target_counts: dict[int, int]
+    seed: int, target_counts: dict[int, int], object_state: ObjectState
 ) -> PlacementConfig:
     """
     Creates the default placement configuration for full-object rendering.
@@ -133,15 +136,24 @@ def _default_placement_config(
     Args:
         seed (int): Random seed used by placement.
         target_counts (dict[int, int]): Target counts by template ID.
+        object_state (ObjectState): Scene state used to compute molecule sizes.
 
     Returns:
         PlacementConfig: Placement configuration instance.
     """
     target_total = int(sum(target_counts.values()))
+    max_radius = max(
+        compute_bounding_sphere_radius(template=t)
+        for t in object_state.templates.values()
+    )
+    # Molecules are sampled from [min_center_distance, frontier_radius] away from the
+    # anchor COM. min_center_distance = 2*max_radius ensures bounding spheres don't
+    # overlap at the sampling stage. The 0.5 Å gap on top gives a small surface clearance.
     return PlacementConfig(
         seed=seed,
         max_total_attempts=max(1000, target_total * 100),
-        frontier_radius=0.35,
+        min_center_distance=2.0 * max_radius,
+        frontier_radius=2.0 * max_radius + 0.5,
         target_instance_count=target_total,
         stop_when_target_met=True,
         require_in_bounds=True,
@@ -230,7 +242,9 @@ def main() -> None:
     args = parser.parse_args()
 
     object_state, target_counts = build_object_state(object_key=args.object_key)
-    config = _default_placement_config(seed=args.seed, target_counts=target_counts)
+    config = _default_placement_config(
+        seed=args.seed, target_counts=target_counts, object_state=object_state
+    )
     arranged_state = place_molecules(
         object_state=object_state,
         config=config,
