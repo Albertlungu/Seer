@@ -213,7 +213,9 @@ def create_instance(
     )
 
 
-def sample_random_rotation(rng: np.random.Generator) -> Matrix3x3:
+def sample_random_rotation(
+    rng: np.random.Generator,
+) -> tuple[Matrix3x3, tuple[float, float, float]]:
     """
     Gets a random rotation using an rng.
 
@@ -230,7 +232,7 @@ def sample_random_rotation(rng: np.random.Generator) -> Matrix3x3:
     )
     yaw, pitch, roll = radians(yaw), radians(pitch), radians(roll)
 
-    return get_rotation_matrix(yaw=yaw, pitch=pitch, roll=roll)
+    return get_rotation_matrix(yaw=yaw, pitch=pitch, roll=roll), (yaw, pitch, roll)
 
 
 def place_seed_instance(
@@ -263,7 +265,7 @@ def place_seed_instance(
     object_center = compute_bbox_center(
         object_state.box_bottom, object_state.box_top
     )  # Position
-    rotation_matrix = sample_random_rotation(rng=rng)
+    rotation_matrix = sample_random_rotation(rng=rng)[0]
     instance_id = 0
     return create_instance(
         template_id=template_id,
@@ -302,7 +304,7 @@ def sample_candidate_pose(
 
     position = anchor_world_com + delta
 
-    return position, sample_random_rotation(rng=rng)
+    return position, sample_random_rotation(rng=rng)[0]
 
 
 def check_placement(
