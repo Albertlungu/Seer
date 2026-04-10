@@ -17,18 +17,18 @@ ELEMENT_COLORS: dict[int, tuple[float, float, float]] = {
     26: (0.6, 0.3, 0.1),  # Iron
 }
 
-ELEMENT_RADII: dict[int, float] = {
-    1: 0.05,
-    6: 0.08,
-    7: 0.08,
-    8: 0.08,
-    14: 0.10,
-    16: 0.10,
-    20: 0.12,
-    26: 0.12,
+ELEMENT_RADII: dict[int, float] = {  # In metres
+    1: 1.20e-10,
+    6: 1.70e-10,
+    7: 1.55e-10,
+    8: 1.52e-10,
+    14: 2.10e-10,
+    16: 1.80e-10,
+    20: 2.31e-10,
+    26: 1.94e-10,
 }
 
-ELEMENT_MASSES: dict[int, float] = {
+ELEMENT_MASSES: dict[int, float] = {  # g/mol
     1: 1.008,
     6: 12.011,
     7: 14.007,
@@ -40,4 +40,8 @@ ELEMENT_MASSES: dict[int, float] = {
 }
 
 DEFAULT_COLOR: tuple[float, float, float] = (0.8, 0.0, 0.8)
-DEFAULT_RADIUS: float = 0.08
+DEFAULT_RADIUS: float = 1.40e-10  # In metres
+
+SCENE_SCALE: float = 0.335 / 0.37790948  # Converts one unit in normalized capture to 1m
+
+ANGSTROM_TO_METRES: float = 1e-10

@@ -51,6 +51,7 @@ class MoleculeInstance:
     template_id: int  # Index/key pointing into ObjectState.templates
     position: np.ndarray  # The instance's position in the full environment
     rotation: np.ndarray  # World orientation transformation for the instance
+    hpr: tuple[float, float, float]  # (yaw, pitch, roll) in radians; convert to degrees for setHpr
     id: int  # Unique ID for bookkeeping
     velocity: np.ndarray | None = (
         None  # Not yet used, for future time-related shenanigans

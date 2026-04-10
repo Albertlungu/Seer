@@ -7,6 +7,7 @@ Turns arranged molecular states into visible structures. Atoms as normal spheres
 as cylinders, but as electron-density regions, reflecting bond order (taking into account sigma/pi bonds)
 """
 
+import math
 from typing import cast
 
 import numpy as np
@@ -18,7 +19,6 @@ from panda3d.core import (
     GeomVertexData,
     GeomVertexFormat,
     GeomVertexWriter,
-    Mat4,
     NodePath,
     TransparencyAttrib,
 )
@@ -46,25 +46,24 @@ def create_atom_sphere(
     aid: int,
 ) -> NodePath:
     """
-    Creates a sphere representing an atom.
+    Creates a simple sphere representing one atom.
 
     Args:
-        base (ShowBase): Panda3D app object
-        parent (NodePath): Scene-graph parent
-        template (MoleculeTemplate): Target molecule template
-        aid (int): Atom ID
+        base (ShowBase): Panda3D app object.
+        parent (NodePath): Scene-graph parent.
+        template (MoleculeTemplate): Source template.
+        aid (int): Atom ID to locate in the template.
 
     Raises:
-        ValueError: If there are no matching aids
-        RuntimeError: If the base loader is not initialized
+        ValueError: If aid does not match one entry in the template
+        RuntimeError: If base.loader is not initialized
 
     Returns:
-        NodePath: The sphere.
+        NodePath: The positioned sphere Node.
     """
-
     atom_idx_array = np.where(template.aids == aid)[0]
     if len(atom_idx_array) != 1:
-        raise ValueError(f"Expected 1 matching aid, got {len(atom_idx_array)}")
+        raise ValueError(f"Expected 1 match, got {len(atom_idx_array)}")
     atom_idx = int(atom_idx_array[0])
 
     element = template.elements[atom_idx]
@@ -72,7 +71,7 @@ def create_atom_sphere(
     radius = ELEMENT_RADII.get(element, DEFAULT_RADIUS)
 
     if base.loader is None:
-        raise RuntimeError("ShowBase loader is not initialized")
+        raise RuntimeError("ShowBase loader not initialized")
     sphere = cast(NodePath, base.loader.loadModel("models/misc/sphere"))
 
     sphere.reparentTo(parent)
@@ -84,40 +83,6 @@ def create_atom_sphere(
     return sphere
 
 
-def _pose_to_mat4(rotation: Matrix3x3, position: Matrix3x1) -> Mat4:
-    """
-    Converts position and rotation (pose) to a Panda3D mat4 object
-
-    Args:
-        rotation (Matrix3x3): Rotation matrix, shape (3, 3)
-        position (Matrix3x1): Position matrix, shape (3,)
-
-    Returns:
-        Mat4: The converted Mat4 object representing both rotation and position
-    """
-    r = np.asarray(rotation, dtype=float).reshape(3, 3)
-    t = np.asarray(position, dtype=float).reshape(3)
-
-    return Mat4(
-        r[0, 0],
-        r[0, 1],
-        r[0, 2],
-        0.0,
-        r[1, 0],
-        r[1, 1],
-        r[1, 2],
-        0.0,
-        r[2, 0],
-        r[2, 1],
-        r[2, 2],
-        0.0,
-        t[0],
-        t[1],
-        t[2],
-        1.0,
-    )
-
-
 def build_instance_root(
     parent: NodePath,
     template: MoleculeTemplate,
@@ -125,18 +90,18 @@ def build_instance_root(
     base: ShowBase,
 ) -> NodePath:
     """
-    Builds the instance root to handle all the translation and rotation for the molecule as a whole.
+    Attaches atom spheres and bond clouds for one molecule instance, then sets its world pose.
 
     Args:
-        parent (NodePath): Node parent.
-        template (MoleculeTemplate): Molecule template
-        instance (MoleculeInstance): Molecule instance
-        base (ShowBase): Panda3D base app object
+        parent (NodePath): Scene-graph parent
+        template (MoleculeTemplate): Source template
+        instance (MoleculeInstance): Instance carrying position and hpr
+        base (ShowBase): Panda3D app object
 
     Returns:
-        NodePath: The molecule
+        NodePath: The molecule root node with pose applied
     """
-    root = parent.attachNewNode(f"molecule_{instance.id}")
+    root = parent.attachNewNode(f"molecule{instance.id}")
     local_coords = np.column_stack(template.local_xyz)
     aid_to_index = {int(aid): idx for idx, aid in enumerate(template.aids)}
 
@@ -144,53 +109,45 @@ def build_instance_root(
         create_atom_sphere(base=base, parent=root, template=template, aid=int(aid))
 
     for aid1, aid2, order in zip(
-        template.bonds_aid1,
-        template.bonds_aid2,
-        template.bond_order,
+        template.bonds_aid1, template.bonds_aid2, template.bond_order
     ):
         idx1 = aid_to_index.get(int(aid1))
         idx2 = aid_to_index.get(int(aid2))
         if idx1 is None or idx2 is None:
             continue
-
-        atom_a = local_coords[idx1]
-        atom_b = local_coords[idx2]
         create_bond_visual(
             base=base,
             parent=root,
-            atom_a=atom_a,
-            atom_b=atom_b,
+            atom_a=local_coords[idx1],
+            atom_b=local_coords[idx2],
             bond_order=int(order),
         )
 
-    root.setMat(_pose_to_mat4(instance.rotation, instance.position))
+    h, p, r = instance.hpr
+    root.setPos(*instance.position.tolist())
+    root.setHpr(math.degrees(h), math.degrees(p), math.degrees(r))
     return root
 
 
 def render_object_state(
-    base: ShowBase,
-    parent: NodePath,
-    object_state: ObjectState,
+    base: ShowBase, parent: NodePath, object_state: ObjectState
 ) -> dict[int, NodePath]:
     """
     Builds render nodes for all placed instances in one object state.
 
     Args:
-        base (ShowBase): Panda3D base app object.
-        parent (NodePath): Scene-graph parent for all molecule roots.
-        object_state (ObjectState): Current arranged object state.
+        base (ShowBase): Panda3D app object
+        parent (NodePath): Scene-graph parent for all molecule roots
+        object_state (ObjectState): Fully placed object state
 
     Returns:
-        dict[int, NodePath]: Mapping from instance ID to molecule root node.
+        dict[int, NodePath]: Maps instance ID to molecule root node
     """
     instance_roots: dict[int, NodePath] = {}
     for instance_id, instance in object_state.instances.items():
         template = object_state.templates[instance.template_id]
         instance_roots[instance_id] = build_instance_root(
-            parent=parent,
-            template=template,
-            instance=instance,
-            base=base,
+            parent=parent, template=template, instance=instance, base=base
         )
     return instance_roots
 
@@ -200,11 +157,11 @@ def clear_removed_instance(
     instance_id: int,
 ) -> None:
     """
-    Removes one rendered molecule instance by ID.
+    Removes one rendered molecule instance by ID
 
     Args:
-        instance_roots (dict[int, NodePath]): Cache of rendered instance roots.
-        instance_id (int): Instance ID to remove.
+        instance_roots (dict[int, NodePath]): Cache of rendered instance roots
+        instance_id (int): Instance ID to remove
     """
     root = instance_roots.pop(instance_id, None)
     if root is not None:
@@ -221,13 +178,13 @@ def sync_scene_render(
     Synchronizes render nodes with the current object state.
 
     Args:
-        base (ShowBase): Panda3D base app object.
-        parent (NodePath): Scene-graph parent for all molecule roots.
-        object_state (ObjectState): Current arranged object state.
-        instance_roots (dict[int, NodePath]): Existing cache of rendered roots.
+        base (ShowBase): Panda3D app object
+        parent (NodePath): Scene-graph parent
+        object_state (ObjectState): Current arranged state
+        instance_roots (dict[int, NodePath]): Existing cache of rendered roots
 
     Returns:
-        dict[int, NodePath]: Updated mapping from instance ID to molecule root node.
+        dict[int, NodePath]: Updated instance root map
     """
     live_ids = set(object_state.instances.keys())
     cached_ids = set(instance_roots.keys())
@@ -240,35 +197,64 @@ def sync_scene_render(
         if instance_id not in instance_roots:
             template = object_state.templates[instance.template_id]
             instance_roots[instance_id] = build_instance_root(
-                parent=parent,
-                template=template,
-                instance=instance,
-                base=base,
+                parent=parent, template=template, instance=instance, base=base
             )
             continue
 
-        instance_roots[instance_id].setMat(
-            _pose_to_mat4(instance.rotation, instance.position)
-        )
+        root = instance_roots[instance_id]
+        h, p, r = instance.hpr
+        root.setPos(*instance.position.tolist())
+        root.setHpr(math.degrees(h), math.degrees(p), math.degrees(r))
 
-    return instance_roots
+        return instance_roots
 
 
 def bond_order_to_vis(bond_order: int) -> tuple[int, int]:
     """
-    Maps bond order to visual component counts. Does not account for delta bonds.
+    Maps bond order to (sigma_count, pi_count). Does not account for delta bonds.
 
     Args:
-        bond_order (int): The bond order.
+        bond_order (int): The bond order
 
     Returns:
-        tuple[int, int]: number of sigma bonds, number of pi bonds
+        tuple[int, int]: Number of sigma components, number of pi components
     """
     if bond_order <= 1:
         return 1, 0
     if bond_order == 2:
         return 1, 1
     return 1, 2
+
+
+def _perpendicular_axes(unit_axis: Matrix3x1) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Builds two vectors perpendicular to a bond axis using Gram-Schmidt.
+
+    Args:
+        unit_axis (Matrix3x1): Unit vector along the bond axis.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Two orthonormal vectors perpendicular to unit_axis.
+    """
+    ref = np.array([0.0, 0.0, 1.0])
+    if abs(float(np.dot(unit_axis, ref))) > 0.95:
+        ref = np.array([0.0, 1.0, 0.0])
+
+    u = np.cross(unit_axis, ref)
+    u_norm = float(np.linalg.norm(u))
+    if u_norm < 1e-8:
+        u = np.array([1.0, 0.0, 0.0])
+        u_norm = 1.0
+    u /= u_norm
+
+    v = np.cross(unit_axis, u)
+    v_norm = float(np.linalg.norm(v))
+    if v_norm < 1e-8:
+        v = np.array([0.0, 1.0, 0.0])
+        v_norm = 1.0
+    v /= v_norm
+
+    return u, v
 
 
 def _create_density_cloud(
@@ -286,21 +272,21 @@ def _create_density_cloud(
     Creates a sampled dot cloud from orbital-density formulas.
 
     Args:
-        base (ShowBase): Panda3D Base app object
-        parent (NodePath): Node parent
-        start (Matrix3x1): Starting point (one atom)
-        end (Matrix3x1): Ending point (the other atom)
-        center_offset (Matrix3x1): Sigma has no offset (center on bond axis), Pi has +/- offsets for side lobes
-        radial_scale (float): Thickness of cloud perpendicular to bond axis
-        alpha (float): Transparency level
-        color (tuple[float, float, float]): RGB color for rendered dots.
-        lobe_axis (np.ndarray | None): If provided, uses a pi-like orbital term along this axis.
+        base (ShowBase): Panda3D app object.
+        parent (NodePath): Node parent.
+        start (Matrix3x1): Starting atom position.
+        end (Matrix3x1): Ending atom position.
+        center_offset (Matrix3x1): Offset from bond midpoint (zero for sigma, +/- for pi lobes).
+        radial_scale (float): Cloud thickness perpendicular to bond axis.
+        alpha (float): Transparency level.
+        color (tuple[float, float, float]): RGB color for dots.
+        lobe_axis (np.ndarray | None): If given, uses a pi-type orbital term along this axis.
 
     Raises:
-        RuntimeError: If the ShowBase loader is not initialized
+        RuntimeError: If base.loader is not initialized.
 
     Returns:
-        NodePath: The electron cloud
+        NodePath: The electron cloud node.
     """
     start_vec = np.asarray(start, dtype=float).reshape(3)
     end_vec = np.asarray(end, dtype=float).reshape(3)
@@ -348,14 +334,10 @@ def _create_density_cloud(
 
     rng = np.random.default_rng(seed)
 
-    # sigma: psi = exp(-zeta*rA) + exp(-zeta*rB)
-    # pi:    psi = (n·(r-rA))*exp(-zeta*rA) + (n·(r-rB))*exp(-zeta*rB)
-    # density rho = |psi|^2
     zeta = max(2.0 / max(length, 0.2), 1.25)
     half_len = 0.5 * length
     radial_extent = max(radial_scale * 4.5, 0.14)
     along_extent = half_len + max(0.22 * length, 0.08)
-
     candidate_count = dot_count * 9
 
     if lobe_axis is None:
@@ -391,7 +373,6 @@ def _create_density_cloud(
         psi = (r_a_vec @ orbital_axis) * phi_a + (r_b_vec @ orbital_axis) * phi_b
 
     rho = psi * psi
-
     rho_sum = float(np.sum(rho))
     if rho_sum <= 1e-20:
         weights = np.full(candidate_count, 1.0 / candidate_count)
@@ -429,38 +410,6 @@ def _create_density_cloud(
     return cloud
 
 
-def _perpendicular_axes(unit_axis: Matrix3x1) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Takes the bond axis direction vector, picks a reference vector that is not parallel, builds a
-    vector (u) to be perpendicular to bond axis, and another (v) perpendicular to bond axis and u
-
-    Args:
-        unit_axis (Matrix3x1): The vector representing the bond axis
-
-    Returns:
-        tuple[np.ndarray, np.ndarray]: Tuple containing both perpendicular vectors.
-    """
-    ref = np.asarray([0.0, 0.0, 1.0])
-    if abs(float(np.dot(unit_axis, ref))) > 0.95:
-        ref = np.array([0.0, 1.0, 0.0])
-
-    u = np.cross(unit_axis, ref)
-    u_norm = float(np.linalg.norm(u))
-    if u_norm < 1e-8:
-        u = np.array([1.0, 0.0, 0.0])
-        u_norm = 1.0
-    u /= u_norm
-
-    v = np.cross(unit_axis, u)
-    v_norm = float(np.linalg.norm(v))
-    if v_norm < 1e-8:
-        v = np.array([0.0, 1.0, 0.0])
-        v_norm = 1.0
-    v /= v_norm
-
-    return u, v
-
-
 def create_sigma_bond_cloud(
     base: ShowBase,
     parent: NodePath,
@@ -472,10 +421,10 @@ def create_sigma_bond_cloud(
     Creates one sigma bond cloud aligned with the bond axis.
 
     Args:
-        base (ShowBase): Panda3D Base app object.
+        base (ShowBase): Panda3D app object.
         parent (NodePath): Node parent.
-        atom_a (np.ndarray): Coordinates of first atom in local molecule space.
-        atom_b (np.ndarray): Coordinates of second atom in local molecule space.
+        atom_a (np.ndarray): First atom position in local molecule space.
+        atom_b (np.ndarray): Second atom position in local molecule space.
         bond_order (int): Bond order used to scale sigma cloud thickness.
 
     Returns:
@@ -506,11 +455,11 @@ def create_pi_bond_cloud(
     Creates the two opposite lobes for one pi bond component.
 
     Args:
-        base (ShowBase): Panda3D Base app object.
+        base (ShowBase): Panda3D app object.
         parent (NodePath): Node parent.
-        atom_a (np.ndarray): Coordinates of first atom in local molecule space.
-        atom_b (np.ndarray): Coordinates of second atom in local molecule space.
-        offset_axis (np.ndarray): Unit axis perpendicular to the bond axis used for lobe offsets.
+        atom_a (np.ndarray): First atom position in local molecule space.
+        atom_b (np.ndarray): Second atom position in local molecule space.
+        offset_axis (np.ndarray): Unit axis perpendicular to the bond axis for lobe offsets.
 
     Returns:
         tuple[NodePath, NodePath]: Positive and negative pi lobe nodes.
@@ -549,14 +498,14 @@ def create_bond_visual(
     bond_order: int,
 ) -> list[NodePath]:
     """
-    Creates all bond cloud nodes for a bond using sigma and pi components.
+    Creates all bond cloud nodes for one covalent bond.
 
     Args:
-        base (ShowBase): Panda3D Base app object.
+        base (ShowBase): Panda3D app object.
         parent (NodePath): Node parent.
-        atom_a (np.ndarray): Coordinates of first atom in local molecule space.
-        atom_b (np.ndarray): Coordinates of second atom in local molecule space.
-        bond_order (int): Bond order used to determine sigma/pi components.
+        atom_a (np.ndarray): First atom position in local molecule space.
+        atom_b (np.ndarray): Second atom position in local molecule space.
+        bond_order (int): Bond order.
 
     Returns:
         list[NodePath]: All created cloud nodes for the bond.
@@ -581,7 +530,6 @@ def create_bond_visual(
     norm = float(np.linalg.norm(axis))
     if norm < 1e-8:
         return visuals
-
     axis = axis / norm
     u, v = _perpendicular_axes(axis)
 
