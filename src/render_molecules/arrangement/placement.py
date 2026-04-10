@@ -173,6 +173,7 @@ def create_instance(
     instance_id: int,
     position: Matrix3x1,
     rotation: Matrix3x3,
+    hpr: tuple[float, float, float],
     velocity: np.ndarray | None = None,
 ) -> MoleculeInstance:
     """
@@ -184,6 +185,7 @@ def create_instance(
         instance_id (int): Unique instance ID
         position (np.ndarray): Desired world-space COM position vector
         rotation (np.ndarray): Rotation matrix
+        hpr (tuple[float, float, float]): (yaw, pitch, roll) in radians from sample_random_rotation
         velocity (np.ndarray | None, optional): Velocity vector. Defaults to None.
 
     Raises:
@@ -208,6 +210,7 @@ def create_instance(
         template_id=template_id,
         position=translation.astype(float),
         rotation=rotation.astype(float),
+        hpr=hpr,
         velocity=vel.astype(float),
         id=instance_id,
     )
@@ -265,7 +268,7 @@ def place_seed_instance(
     object_center = compute_bbox_center(
         object_state.box_bottom, object_state.box_top
     )  # Position
-    rotation_matrix = sample_random_rotation(rng=rng)[0]
+    rotation_matrix, hpr = sample_random_rotation(rng=rng)
     instance_id = 0
     return create_instance(
         template_id=template_id,
@@ -273,6 +276,7 @@ def place_seed_instance(
         instance_id=instance_id,
         position=object_center,
         rotation=rotation_matrix,
+        hpr=hpr,
         velocity=None,
     )
 
@@ -282,7 +286,7 @@ def sample_candidate_pose(
     frontier_radius: float,
     min_distance: float,
     rng: np.random.Generator,
-) -> tuple[Matrix3x1, Matrix3x3]:
+) -> tuple[Matrix3x1, Matrix3x3, tuple[float, float, float]]:
     """
     Decides where to put a new molecule. Generates a random position between min_distance and
     frontier_radius of the anchor COM, with a random rotation.
@@ -294,7 +298,7 @@ def sample_candidate_pose(
         rng (np.random.Generator): PRNG generator instance
 
     Returns:
-        tuple[Matrix3x1, Matrix3x3]: position in world space, rotation matrix
+        tuple[Matrix3x1, Matrix3x3, tuple[float, float, float]]: position, rotation matrix, hpr radians
     """
     direction = rng.standard_normal(3)
     direction /= np.linalg.norm(direction)
@@ -303,8 +307,9 @@ def sample_candidate_pose(
     delta = direction * distance
 
     position = anchor_world_com + delta
+    rotation_matrix, hpr = sample_random_rotation(rng=rng)
 
-    return position, sample_random_rotation(rng=rng)[0]
+    return position, rotation_matrix, hpr
 
 
 def check_placement(
@@ -346,6 +351,7 @@ def check_placement(
             instance_id=-1,  # Temporary; not registered in object_state
             position=candidate_position,
             rotation=candidate_rotation,
+            hpr=(0.0, 0.0, 0.0),  # Never rendered; placeholder only
         )
         for instance_id in grid.neighbors(candidate_position):
             existing_instance = object_state.instances[instance_id]
@@ -498,7 +504,7 @@ def place_molecules(
         anchor_local_com = calculate_center_of_mass(anchor_template)
         anchor_world_com = (anchor_instance.rotation @ anchor_local_com) + anchor_instance.position
 
-        candidate_position, candidate_rotation = sample_candidate_pose(
+        candidate_position, candidate_rotation, candidate_hpr = sample_candidate_pose(
             anchor_world_com=anchor_world_com,
             frontier_radius=config.frontier_radius,
             min_distance=config.min_center_distance or 0.0,
@@ -520,6 +526,7 @@ def place_molecules(
                 instance_id=next_instance_id,
                 position=candidate_position,
                 rotation=candidate_rotation,
+                hpr=candidate_hpr,
             )
             object_state.instances[next_instance_id] = new_instance
             grid.insert(instance_id=next_instance_id, position=candidate_position)
