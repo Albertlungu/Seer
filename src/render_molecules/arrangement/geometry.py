@@ -12,7 +12,12 @@ from src.render_molecules.arrangement.scene_state import (
     MoleculeInstance,
     MoleculeTemplate,
 )
-from src.utils.constants import DEFAULT_RADIUS, ELEMENT_MASSES, ELEMENT_RADII
+from src.utils.constants import (
+    ANGSTROM_TO_METRES,
+    DEFAULT_RADIUS,
+    ELEMENT_MASSES,
+    ELEMENT_RADII,
+)
 from src.utils.type_annotations import Matrix3x1, Matrix3x3, Matrix3x4
 
 # ============================================================================
@@ -384,15 +389,16 @@ def check_instance_overlap(
     if bbox_pass:
         return False
 
+    # Convert atomic radii from meters to Angstroms to match coordinate system
     radii_1 = np.array(
         [
-            ELEMENT_RADII.get(int(element), DEFAULT_RADIUS)
+            ELEMENT_RADII.get(int(element), DEFAULT_RADIUS) / ANGSTROM_TO_METRES
             for element in template_1.elements
         ]
     )
     radii_2 = np.array(
         [
-            ELEMENT_RADII.get(int(element), DEFAULT_RADIUS)
+            ELEMENT_RADII.get(int(element), DEFAULT_RADIUS) / ANGSTROM_TO_METRES
             for element in template_2.elements
         ]
     )
@@ -447,8 +453,8 @@ def compute_bbox_center(box_bottom: Matrix3x4, box_top: Matrix3x4) -> Matrix3x1:
     Returns:
         Matrix3x1: Center in XYZ coords
     """
-    lower = np.minimum.reduce(box_bottom)
-    upper = np.maximum.reduce(box_top)
+    lower = np.minimum.reduce(box_bottom, axis=1)
+    upper = np.maximum.reduce(box_top, axis=1)
 
     return (lower + upper) / 2
 

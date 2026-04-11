@@ -29,6 +29,7 @@ from src.render_molecules.arrangement.scene_state import (
     ObjectState,
 )
 from src.utils.constants import (
+    ANGSTROM_TO_METRES,
     DEFAULT_COLOR,
     DEFAULT_RADIUS,
     ELEMENT_COLORS,
@@ -68,7 +69,8 @@ def create_atom_sphere(
 
     element = template.elements[atom_idx]
     color = ELEMENT_COLORS.get(element, DEFAULT_COLOR)
-    radius = ELEMENT_RADII.get(element, DEFAULT_RADIUS)
+    # Convert radius from meters to Angstroms to match coordinate system
+    radius = ELEMENT_RADII.get(element, DEFAULT_RADIUS) / ANGSTROM_TO_METRES
 
     if base.loader is None:
         raise RuntimeError("ShowBase loader not initialized")

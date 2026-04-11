@@ -115,9 +115,9 @@ def build_spatial_grid(object_state: ObjectState) -> SpatialGrid:
     )
     cell_size = 2.0 * max_radius
 
-    all_corners = np.vstack([object_state.box_bottom, object_state.box_top])
-    min_corner = np.min(all_corners, axis=0)
-    max_corner = np.max(all_corners, axis=0)
+    all_corners = np.hstack([object_state.box_bottom, object_state.box_top])
+    min_corner = np.min(all_corners, axis=1)
+    max_corner = np.max(all_corners, axis=1)
     dims = max_corner - min_corner
 
     nx = max(1, math.ceil(dims[0] / cell_size))
@@ -338,9 +338,9 @@ def check_placement(
     template = object_state.templates[template_id]
 
     if config.require_in_bounds:
-        all_corners = np.vstack([object_state.box_bottom, object_state.box_top])
-        min_corner = np.min(all_corners, axis=0)
-        max_corner = np.max(all_corners, axis=0)
+        all_corners = np.hstack([object_state.box_bottom, object_state.box_top])
+        min_corner = np.min(all_corners, axis=1)
+        max_corner = np.max(all_corners, axis=1)
         if not point_in_bounds(candidate_position, (min_corner, max_corner)):
             return False
 
@@ -480,6 +480,11 @@ def place_molecules(
         rng=rng,
     )
     object_state.instances[0] = seed_instance
+
+    # Insert seed instance into spatial grid for overlap detection
+    seed_local_com = calculate_center_of_mass(initial_template)
+    seed_world_com = (seed_instance.rotation @ seed_local_com) + seed_instance.position
+    grid.insert(instance_id=0, position=seed_world_com)
 
     active_frontier[0] = (
         0  # Adds seed instance to active frontier with rejection count zero
