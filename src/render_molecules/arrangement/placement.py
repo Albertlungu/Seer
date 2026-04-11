@@ -244,7 +244,11 @@ def place_seed_instance(
     rng: np.random.Generator,
 ) -> MoleculeInstance:
     """
-    Creates the seed instance at the center of an object's bounding box.
+    Creates the seed instance at the origin.
+
+    The seed is placed at (0,0,0) to keep molecular clusters near the origin
+    for better floating-point precision in rendering. The bounding box is only
+    used for bounds checking, not for centering the cluster.
 
     Args:
         object_state (ObjectState): The current object state dataclass containing all necessary info
@@ -265,16 +269,15 @@ def place_seed_instance(
             f"Found {len(template_id)} appearances for {template.name}, expected 1 (whoopsies!)"
         )
     template_id = template_id[0]
-    object_center = compute_bbox_center(
-        object_state.box_bottom, object_state.box_top
-    )  # Position
+    # Place seed at origin instead of bbox center
+    seed_position = np.array([0.0, 0.0, 0.0])
     rotation_matrix, hpr = sample_random_rotation(rng=rng)
     instance_id = 0
     return create_instance(
         template_id=template_id,
         object_state=object_state,
         instance_id=instance_id,
-        position=object_center,
+        position=seed_position,
         rotation=rotation_matrix,
         hpr=hpr,
         velocity=None,

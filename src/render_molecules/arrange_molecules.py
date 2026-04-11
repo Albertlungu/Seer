@@ -141,8 +141,8 @@ def run_arrangement() -> None:
     max_radius = max(
         compute_bounding_sphere_radius(template) for template in templates.values()
     )
-    # Set frontier radius to be a few molecular diameters (allows some spacing)
-    frontier_radius = max_radius * 4.0
+    # Set frontier radius to be several molecular diameters
+    frontier_radius = max_radius * 6.0
 
     _bb_min = np.minimum.reduce(object_state.box_bottom.T)
     _bb_max = np.maximum.reduce(object_state.box_top.T)
@@ -151,11 +151,11 @@ def run_arrangement() -> None:
     config = PlacementConfig(
         seed=_RNG_SEED,
         frontier_radius=frontier_radius,
-        min_center_distance=max_radius * 2.0,  # Minimum separation between molecule centers
+        min_center_distance=max_radius * 3.5,  # Minimum separation: 1.75× molecular diameter for clear spacing
         max_total_attempts=total_target * 100,
         target_instance_count=total_target,
         stop_when_target_met=True,
-        require_in_bounds=True,
+        require_in_bounds=False,  # Molecules placed at origin, not constrained by physical bbox
         require_no_overlap=True,
     )
 
