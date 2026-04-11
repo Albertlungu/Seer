@@ -92,9 +92,9 @@ def build_object_state(
         ObjectState: Empty state container ready for placement.
     """
     corners = object_data["corners"]
-    all_corners = np.array(corners["bottom"] + corners["top"], dtype=float)  # (8, 3)
-    box_bottom = np.min(all_corners, axis=0)
-    box_top = np.max(all_corners, axis=0)
+    # JSON gives 4 points as [[x,y,z], ...] — transpose to (3, 4) as Matrix3x4
+    box_bottom = np.array(corners["bottom"], dtype=float).T  # (3, 4)
+    box_top = np.array(corners["top"], dtype=float).T        # (3, 4)
 
     return ObjectState(
         object_key=object_key,
@@ -134,7 +134,9 @@ def run_arrangement() -> None:
     total_target = sum(target_counts.values())
 
     # Scale frontier radius to the actual bounding box dimensions
-    box_diag = float(np.linalg.norm(object_state.box_top - object_state.box_bottom))
+    _bb_min = np.minimum.reduce(object_state.box_bottom.T)
+    _bb_max = np.maximum.reduce(object_state.box_top.T)
+    box_diag = float(np.linalg.norm(_bb_max - _bb_min))
     frontier_radius = max(0.5, box_diag / math.cbrt(total_target) * 0.8)
 
     config = PlacementConfig(
@@ -157,10 +159,13 @@ def run_arrangement() -> None:
     base.setBackgroundColor(0.05, 0.05, 0.08, 1.0)
 
     # Position camera to see the full bounding box
-    center = (object_state.box_bottom + object_state.box_top) * 0.5
+    # box_bottom/box_top are (3, 4); reduce to a single center point
+    scene_min = np.minimum.reduce(object_state.box_bottom.T)
+    scene_max = np.maximum.reduce(object_state.box_top.T)
+    center = (scene_min + scene_max) * 0.5
     assert base.cam is not None
-    base.cam.setPos(center[0], center[1] - box_diag * 2.0, center[2])
-    base.cam.lookAt(*center.tolist())
+    base.cam.setPos(float(center[0]), float(center[1]) - box_diag * 2.0, float(center[2]))
+    base.cam.lookAt(float(center[0]), float(center[1]), float(center[2]))
 
     render_object_state(
         base=base,
