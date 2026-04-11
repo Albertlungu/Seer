@@ -220,3 +220,6 @@ data/vision_json/legacy
 .vscode
 *.claude
 *tasks
+
+# Test scripts
+tests/
