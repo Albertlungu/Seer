@@ -11,20 +11,23 @@ Serves as the top-level orchestration script for building realistic static molec
 import math
 
 import numpy as np
+from direct.gui.DirectGui import DirectLabel, DirectSlider
 from direct.showbase.ShowBase import ShowBase
 
 from src.render_molecules.arrangement.placement import PlacementConfig, place_molecules
-from src.render_molecules.arrangement.renderer import render_object_state, set_atom_scale_factor
+from src.render_molecules.arrangement.renderer import (
+    render_object_state,
+    set_atom_scale_factor,
+)
 from src.render_molecules.arrangement.scene_state import (
     MoleculeTemplate,
     ObjectState,
 )
 from src.utils.constants import ANGSTROM_TO_METRES
 from src.utils.json_io import load_json
-from direct.gui.DirectGui import DirectSlider, DirectLabel
 
 _JSON_FILENAME = "final_aggregated.json"
-_TARGET_COUNT_PER_TEMPLATE = 1  # Temporarily set to 1 for single molecule test
+_TARGET_COUNT_PER_TEMPLATE = 100
 _RNG_SEED = 42
 
 
@@ -70,7 +73,6 @@ def build_templates_from_object(object_data: dict) -> dict[int, MoleculeTemplate
             bond_order=bond_order,
         )
         template_id += 1
-        break  # Only load first molecule type for single molecule test
 
     return templates
 
@@ -97,8 +99,10 @@ def build_object_state(
     corners = object_data["corners"]
     # JSON gives 4 points as [[x,y,z], ...] — transpose to (3, 4) as Matrix3x4
     # Convert from meters to Angstroms to match molecular coordinate system
-    box_bottom = np.array(corners["bottom"], dtype=float).T / ANGSTROM_TO_METRES  # (3, 4)
-    box_top = np.array(corners["top"], dtype=float).T / ANGSTROM_TO_METRES        # (3, 4)
+    box_bottom = (
+        np.array(corners["bottom"], dtype=float).T / ANGSTROM_TO_METRES
+    )  # (3, 4)
+    box_top = np.array(corners["top"], dtype=float).T / ANGSTROM_TO_METRES  # (3, 4)
 
     return ObjectState(
         object_key=object_key,
@@ -140,6 +144,7 @@ def run_arrangement() -> None:
     # Calculate frontier radius based on molecular scale
     # Use the maximum bounding sphere radius among all templates
     from src.render_molecules.arrangement.geometry import compute_bounding_sphere_radius
+
     max_radius = max(
         compute_bounding_sphere_radius(template) for template in templates.values()
     )
@@ -153,7 +158,8 @@ def run_arrangement() -> None:
     config = PlacementConfig(
         seed=_RNG_SEED,
         frontier_radius=frontier_radius,
-        min_center_distance=max_radius * 3.5,  # Minimum separation: 1.75× molecular diameter for clear spacing
+        min_center_distance=max_radius
+        * 3.5,  # Minimum separation: 1.75× molecular diameter for clear spacing
         max_total_attempts=total_target * 100,
         target_instance_count=total_target,
         stop_when_target_met=True,
@@ -185,18 +191,22 @@ def run_arrangement() -> None:
         assert base.camera is not None
         base.camera.setY(base.camera, -zoom_speed)
 
-    base.accept('wheel_up', zoom_in)
-    base.accept('wheel_down', zoom_out)
+    base.accept("wheel_up", zoom_in)
+    base.accept("wheel_down", zoom_out)
 
     # Position camera to see the molecular cluster (not the entire box)
     if object_state.instances:
         # Calculate extent of placed molecules
-        from src.render_molecules.arrangement.geometry import calculate_environment_center_of_mass
+        from src.render_molecules.arrangement.geometry import (
+            calculate_environment_center_of_mass,
+        )
 
         positions = []
         for instance in object_state.instances.values():
             template = object_state.templates[instance.template_id]
-            com = calculate_environment_center_of_mass(template=template, instance=instance)
+            com = calculate_environment_center_of_mass(
+                template=template, instance=instance
+            )
             positions.append(com)
 
         positions_array = np.array(positions)
@@ -207,18 +217,28 @@ def run_arrangement() -> None:
 
         # Position camera at a distance that shows all molecules
         # Use molecular extent rather than box size
-        camera_distance = max(mol_extent * 2.0, max_radius * 50.0)  # At least 50 molecular radii away
+        camera_distance = max(
+            mol_extent * 1.0, max_radius * 5.0
+        )  # Closer zoom for better visibility
 
         assert base.cam is not None
-        base.cam.setPos(float(mol_center[0]), float(mol_center[1]) - camera_distance, float(mol_center[2]))
-        base.cam.lookAt(float(mol_center[0]), float(mol_center[1]), float(mol_center[2]))
+        base.cam.setPos(
+            float(mol_center[0]),
+            float(mol_center[1]) - camera_distance,
+            float(mol_center[2]),
+        )
+        base.cam.lookAt(
+            float(mol_center[0]), float(mol_center[1]), float(mol_center[2])
+        )
     else:
         # Fallback if no molecules placed
         scene_min = np.minimum.reduce(object_state.box_bottom.T)
         scene_max = np.maximum.reduce(object_state.box_top.T)
         center = (scene_min + scene_max) * 0.5
         assert base.cam is not None
-        base.cam.setPos(float(center[0]), float(center[1]) - box_diag * 2.0, float(center[2]))
+        base.cam.setPos(
+            float(center[0]), float(center[1]) - box_diag * 2.0, float(center[2])
+        )
         base.cam.lookAt(float(center[0]), float(center[1]), float(center[2]))
 
     render_object_state(
@@ -229,9 +249,9 @@ def run_arrangement() -> None:
 
     # Add atom scale slider
     def update_atom_scale():
-        scale = slider['value']
+        scale = slider["value"]
         set_atom_scale_factor(scale)
-        scale_label['text'] = f'Atom Scale: {scale:.2f}x'
+        scale_label["text"] = f"Atom Scale: {scale:.2f}x"
 
     slider = DirectSlider(
         range=(0.1, 1.0),
@@ -243,7 +263,7 @@ def run_arrangement() -> None:
     )
 
     scale_label = DirectLabel(
-        text='Atom Scale: 1.00x',
+        text="Atom Scale: 1.00x",
         pos=(-0.85, 0, -0.85),
         scale=0.05,
         text_fg=(1, 1, 1, 1),
@@ -251,7 +271,7 @@ def run_arrangement() -> None:
     )
 
     info_label = DirectLabel(
-        text='1.0 = van der Waals | ~0.4 = covalent',
+        text="1.0 = van der Waals | ~0.4 = covalent",
         pos=(-0.85, 0, -0.95),
         scale=0.04,
         text_fg=(0.7, 0.7, 0.7, 1),
