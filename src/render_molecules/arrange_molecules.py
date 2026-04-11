@@ -23,7 +23,7 @@ from src.utils.constants import ANGSTROM_TO_METRES
 from src.utils.json_io import load_json
 
 _JSON_FILENAME = "final_aggregated.json"
-_TARGET_COUNT_PER_TEMPLATE = 5
+_TARGET_COUNT_PER_TEMPLATE = 1  # Temporarily set to 1 for single molecule test
 _RNG_SEED = 42
 
 
@@ -69,6 +69,7 @@ def build_templates_from_object(object_data: dict) -> dict[int, MoleculeTemplate
             bond_order=bond_order,
         )
         template_id += 1
+        break  # Only load first molecule type for single molecule test
 
     return templates
 
@@ -167,6 +168,24 @@ def run_arrangement() -> None:
 
     base = ShowBase()
     base.setBackgroundColor(0.05, 0.05, 0.08, 1.0)
+
+    # Adjust camera clipping planes for better zoom range
+    base.camLens.setNear(0.01)
+    base.camLens.setFar(1000000.0)
+
+    # Add faster mouse wheel zoom
+    zoom_speed = 10.0  # Angstroms per scroll
+
+    def zoom_in():
+        assert base.camera is not None
+        base.camera.setY(base.camera, zoom_speed)
+
+    def zoom_out():
+        assert base.camera is not None
+        base.camera.setY(base.camera, -zoom_speed)
+
+    base.accept('wheel_up', zoom_in)
+    base.accept('wheel_down', zoom_out)
 
     # Position camera to see the molecular cluster (not the entire box)
     if object_state.instances:

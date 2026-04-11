@@ -496,6 +496,10 @@ def place_molecules(
 
     # --- Main loop ---
     for _ in range(config.max_total_attempts):
+        # Check if all targets are met at the start of the loop
+        if all(placed_counts[tid] >= target_counts[tid] for tid in target_counts):
+            break
+
         # Pick which molecule type to place next and which anchor to grow from
         next_template_id = schedule_next_molecule(
             target_counts=target_counts, placed_counts=placed_counts, rng=rng

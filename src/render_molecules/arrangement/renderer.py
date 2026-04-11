@@ -72,6 +72,10 @@ def create_atom_sphere(
     # Convert radius from meters to Angstroms to match coordinate system
     radius = ELEMENT_RADII.get(element, DEFAULT_RADIUS) / ANGSTROM_TO_METRES
 
+    # Temporarily scale down H, C, O atoms by factor of 8 for visual clarity
+    if element in (1, 6, 8):  # Hydrogen, Carbon, Oxygen
+        radius *= 0.125
+
     if base.loader is None:
         raise RuntimeError("ShowBase loader not initialized")
     sphere = cast(NodePath, base.loader.loadModel("models/misc/sphere"))
