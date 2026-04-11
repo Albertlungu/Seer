@@ -338,7 +338,8 @@ def _create_density_cloud(
     if seed == 0:
         seed = 1
 
-    dot_count = max(120, min(380, int(160 + (780 * radial_scale) + (42 * length))))
+    # Increased dot count for denser electron clouds
+    dot_count = max(500, min(2000, int(800 + (3000 * radial_scale) + (200 * length))))
     dot_radius = max(0.003, radial_scale * 0.17)
 
     lobe_key = (
