@@ -38,6 +38,27 @@ from src.utils.constants import (
 from src.utils.type_annotations import Matrix3x1, Matrix3x3
 
 _DENSITY_NODE_CACHE: dict[tuple, GeomNode] = {}
+_ATOM_SCALE_FACTOR: float = 1.0  # Global scale factor for atom rendering
+_ALL_ATOM_SPHERES: list[NodePath] = []  # Track all atom spheres for rescaling
+
+
+def set_atom_scale_factor(scale: float) -> None:
+    """
+    Set the global atom scale factor and update all existing atoms.
+
+    Args:
+        scale: Scale factor (1.0 = van der Waals, ~0.4 = covalent)
+    """
+    global _ATOM_SCALE_FACTOR
+    _ATOM_SCALE_FACTOR = scale
+
+    # Update all existing atom spheres
+    for sphere in _ALL_ATOM_SPHERES:
+        if sphere and not sphere.isEmpty():
+            # Get the base radius from the sphere's tag
+            base_radius = sphere.getTag("base_radius")
+            if base_radius:
+                sphere.setScale(float(base_radius) * scale)
 
 
 def create_atom_sphere(
@@ -69,12 +90,9 @@ def create_atom_sphere(
 
     element = template.elements[atom_idx]
     color = ELEMENT_COLORS.get(element, DEFAULT_COLOR)
-    # Convert radius from meters to Angstroms to match coordinate system
-    radius = ELEMENT_RADII.get(element, DEFAULT_RADIUS) / ANGSTROM_TO_METRES
 
-    # Temporarily scale down H, C, O atoms by factor of 8 for visual clarity
-    if element in (1, 6, 8):  # Hydrogen, Carbon, Oxygen
-        radius *= 0.125
+    # Use van der Waals radii as base, convert to Angstroms
+    base_radius = ELEMENT_RADII.get(element, DEFAULT_RADIUS) / ANGSTROM_TO_METRES
 
     if base.loader is None:
         raise RuntimeError("ShowBase loader not initialized")
@@ -83,8 +101,16 @@ def create_atom_sphere(
     sphere.reparentTo(parent)
     x, y, z = np.column_stack(template.local_xyz)[atom_idx]
     sphere.setPos(float(x), float(y), float(z))
-    sphere.setScale(radius)
+
+    # Store base radius in tag for dynamic rescaling
+    sphere.setTag("base_radius", str(base_radius))
+
+    # Apply current scale factor
+    sphere.setScale(base_radius * _ATOM_SCALE_FACTOR)
     sphere.setColor(*color, 1.0)
+
+    # Track this sphere for dynamic rescaling
+    _ALL_ATOM_SPHERES.append(sphere)
 
     return sphere
 

@@ -14,13 +14,14 @@ import numpy as np
 from direct.showbase.ShowBase import ShowBase
 
 from src.render_molecules.arrangement.placement import PlacementConfig, place_molecules
-from src.render_molecules.arrangement.renderer import render_object_state
+from src.render_molecules.arrangement.renderer import render_object_state, set_atom_scale_factor
 from src.render_molecules.arrangement.scene_state import (
     MoleculeTemplate,
     ObjectState,
 )
 from src.utils.constants import ANGSTROM_TO_METRES
 from src.utils.json_io import load_json
+from direct.gui.DirectGui import DirectSlider, DirectLabel
 
 _JSON_FILENAME = "final_aggregated.json"
 _TARGET_COUNT_PER_TEMPLATE = 1  # Temporarily set to 1 for single molecule test
@@ -224,6 +225,37 @@ def run_arrangement() -> None:
         base=base,
         parent=base.render,
         object_state=object_state,
+    )
+
+    # Add atom scale slider
+    def update_atom_scale():
+        scale = slider['value']
+        set_atom_scale_factor(scale)
+        scale_label['text'] = f'Atom Scale: {scale:.2f}x'
+
+    slider = DirectSlider(
+        range=(0.1, 1.0),
+        value=1.0,  # Default to van der Waals radii
+        pageSize=0.1,
+        command=lambda: update_atom_scale(),
+        pos=(-0.85, 0, -0.9),
+        scale=0.4,
+    )
+
+    scale_label = DirectLabel(
+        text='Atom Scale: 1.00x',
+        pos=(-0.85, 0, -0.85),
+        scale=0.05,
+        text_fg=(1, 1, 1, 1),
+        frameColor=(0, 0, 0, 0),
+    )
+
+    info_label = DirectLabel(
+        text='1.0 = van der Waals | ~0.4 = covalent',
+        pos=(-0.85, 0, -0.95),
+        scale=0.04,
+        text_fg=(0.7, 0.7, 0.7, 1),
+        frameColor=(0, 0, 0, 0),
     )
 
     base.run()
