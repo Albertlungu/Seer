@@ -177,8 +177,9 @@ def run_arrangement() -> None:
     base.setBackgroundColor(0.05, 0.05, 0.08, 1.0)
 
     # Adjust camera clipping planes for better zoom range
-    base.camLens.setNear(0.01)
-    base.camLens.setFar(1000000.0)
+    if base.camLens:
+        base.camLens.setNear(0.01)
+        base.camLens.setFar(1000000.0)
 
     # Add faster mouse wheel zoom
     zoom_speed = 10.0  # Angstroms per scroll
@@ -255,7 +256,7 @@ def run_arrangement() -> None:
 
     slider = DirectSlider(
         range=(0.1, 1.0),
-        value=1.0,  # Default to van der Waals radii
+        value=0.44,  # Default to covalent-like visualization (PubChem uses covalent bond lengths)
         pageSize=0.1,
         command=lambda: update_atom_scale(),
         pos=(-0.85, 0, -0.9),
@@ -263,7 +264,7 @@ def run_arrangement() -> None:
     )
 
     scale_label = DirectLabel(
-        text="Atom Scale: 1.00x",
+        text="Atom Scale: 0.44x",
         pos=(-0.85, 0, -0.85),
         scale=0.05,
         text_fg=(1, 1, 1, 1),
@@ -271,7 +272,7 @@ def run_arrangement() -> None:
     )
 
     info_label = DirectLabel(
-        text="1.0 = van der Waals | ~0.4 = covalent",
+        text="Coords use covalent bond lengths | 1.0 = collision vdW",
         pos=(-0.85, 0, -0.95),
         scale=0.04,
         text_fg=(0.7, 0.7, 0.7, 1),
