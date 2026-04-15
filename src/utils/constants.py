@@ -45,3 +45,23 @@ DEFAULT_RADIUS: float = 1.40e-10  # In metres
 SCENE_SCALE: float = 0.335 / 0.37790948  # Converts one unit in normalized capture to 1m
 
 ANGSTROM_TO_METRES: float = 1e-10
+
+# -------------------------
+# Zoom transition constants
+# -------------------------
+
+LOG_ROOM_DISTANCE: float = 0.6  # log10 of the camera distance in m at room scale (~4m)
+LOG_MOL_DISTANCE: float = (
+    -8.3
+)  # log10 of the camera distance in metres at molecular scale (~5nm)
+LOG_FADE_START: float = (
+    -3.0
+)  # Where the room begins to fade and molecules begin to appear (~1mm)
+LOG_FADE_END: float = (
+    -6.0
+)  # Where room is invisible and it is only molecule visible (~1um)
+SCROLL_STEP_SIZE: float = 0.15
+BASE_MOVEMENT_SPEED: float = 1.5
+ROOM_REFERENCE_DISTANCE: float = (
+    4.0  # Camera distance in m at which BASE_MOVEMENT_SPEED applies
+)
