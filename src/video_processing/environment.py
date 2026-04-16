@@ -10,14 +10,156 @@ Creates the 3D environment in which the user can move around.
 # pyright: reportOptionalMemberAccess=none
 
 import json
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional
 
+from direct.showbase.Loader import Loader
 from direct.showbase.ShowBase import ShowBase
 from direct.showbase.ShowBaseGlobal import globalClock
-from panda3d.core import WindowProperties, loadPrcFileData
+from panda3d.core import (
+    GraphicsWindow,
+    Lens,
+    NodePath,
+    Point3,
+    WindowProperties,
+    loadPrcFileData,
+)
+
+from src.utils.json_io import load_json
 
 loadPrcFileData("", "load-file-type p3assimp")
 
 AGGREGATION_PATH = "./data/vision_json/aggregations.json"
+
+
+@dataclass
+class RoomState:
+    window: GraphicsWindow
+    camera: Lens
+    debug: bool = False
+    mvt_key_states = {
+        "w": False,
+        "s": False,
+        "a": False,
+        "d": False,
+    }
+    mouse_locked: bool = True
+
+    current_fov: float = 90.0
+    current_move_speed: float = 1.5
+
+    fov_delta: float = 2.0
+    move_speed_delta: float = 0.1
+
+    default_move_speed: float = 1.5
+    default_sensitivity: float = 0.1
+    default_hpr: tuple[float, float, float] = (0.0, 90.0, 0.0)
+    default_fov: float = 90.0
+    default_near: float = 0.01
+    aggregation_path: str = AGGREGATION_PATH
+    movement_commands: list[tuple[str, Callable, Any]] = field(
+        default_factory=lambda: [
+            # Movement
+            ("w", set_key, ["w", True]),
+            ("w-up", set_key, ["w", False]),
+            ("a", set_key, ["a", True]),
+            ("a-up", set_key, ["a", False]),
+            ("s", set_key, ["s", True]),
+            ("s-up", set_key, ["s", False]),
+            ("d", set_key, ["d", True]),
+            ("d-up", set_key, ["d", False]),
+            # Speed
+            ("shift-=", control_speed, [0.1]),
+            ("-", control_speed, [-0.1]),
+            # Misc
+            ("escape", toggle_mouse_lock, None),
+        ]
+    )
+
+
+def set_key(room_state: RoomState, key: str, value: bool) -> None:
+    """
+    Record whether a movement key is pressed or released.
+
+    Args:
+        room_state (RoomState): State container holding key states.
+        key (str): The movement key ("w", "a", "s", "d").
+        value (bool): True if pressed, False if released.
+    """
+    room_state.mvt_key_states[key] = value
+
+
+def zoom(room_state: RoomState) -> None:
+    """
+    Adjust the camera field of view by fov_delta.
+
+    Args:
+        room_state (RoomState): State container with current FOV and fov_delta.
+    """
+    fov = room_state.camera.getFov()
+    new_fov = max(0.1, min(100, fov[0] + room_state.fov_delta))
+    room_state.camera.setFov(new_fov)
+
+
+def control_speed(room_state: RoomState) -> None:
+    """
+    Adjust movement speed by move_speed_delta, clamped to [0.1, 10.0].
+
+    Args:
+        room_state (RoomState): State container with current speed and delta.
+    """
+    room_state.current_move_speed = max(
+        0.1, min(10, room_state.current_move_speed + room_state.move_speed_delta)
+    )
+
+
+def toggle_mouse_lock(room_state: RoomState) -> None:
+    """
+    Toggle mouse lock and cursor visibility.
+
+    Args:
+        room_state (RoomState): State container with window, camera, and lock flag.
+    """src/video_processing/environment.py
+    room_state.mouse_locked = not room_state.mouse_locked
+    props = WindowProperties()
+    props.setCursorHidden(room_state.mouse_locked)
+    room_state.win.requestProperties(props)
+
+
+def env_setup(loader: Loader, parent: NodePath, room_state: RoomState) -> NodePath:
+    """
+    Load and configure the room environment.
+
+    Applies rotation, centering, camera setup, and window properties.
+
+    Args:
+        loader (Loader): The loader object from ShowBase.
+        parent (NodePath): The parent node to attach the environment to.
+        room_state (RoomState): State container with camera, window, and defaults.
+
+    Returns:
+        NodePath: The loaded and configured environment node.
+    """
+
+    env: NodePath = loader.loadModel(
+        "data/reconstructions/obj/albert_room.obj"
+    )  # If there are issues, revert to absolute path
+    env.reparentTo(parent)
+    env.setHpr(RoomState.default_hpr)
+    env.setTwoSided(True)
+
+    center: tuple[Point3, Point3] = env.getTightBounds()
+    mid: Point3 = (center[0] + center[1]) / 2
+    env.setPos(-mid.x, -mid.y, -mid.z)
+
+    RoomState.camera.setNear(RoomState.default_near)
+    RoomState.camera.setFov(RoomState.default_fov)
+
+    props = WindowProperties()
+    props.setCursorHidden(True)
+    room_state.window.requestProperties(props)
+
+    return env
 
 
 class Room(ShowBase):
@@ -65,35 +207,47 @@ class Room(ShowBase):
         #   string: name string
 
         self.mouse_locked = True
-        self.accept("escape", self.toggle_mouse_lock)
+
+        # Bind movement commands from RoomState
+        room_state = RoomState(
+            window=self.win,
+            camera=self.camLens,
+            debug=debug,
+            aggregation_path=aggregation_path or AGGREGATION_PATH,
+        )
+        for key, func, args in room_state.movement_commands:
+            if args is not None:
+                self.accept(key, func, args)
+            else:
+                self.accept(key, func)
 
         self.move_speed = 1.5  # In units/s
         self.delta_speed = 0.5  # By how much to change speed
-        self.accept(
-            "shift-=", self.control_speed, [self.delta_speed]
-        )  # e.g. "+" to increase speed
-        self.accept("-", self.control_speed, [-self.delta_speed])  # - to decrease
+        # self.accept(
+        #     "shift-=", self.control_speed, [self.delta_speed]
+        # )  # e.g. "+" to increase speed
+        # self.accept("-", self.control_speed, [-self.delta_speed])  # - to decrease
         self.keys = {
             "w": False,
             "s": False,
             "a": False,
             "d": False,
         }  # Defining the keys used
-        self.accept("w", self.set_key, ["w", True])
-        self.accept("w-up", self.set_key, ["w", False])
-        self.accept("a", self.set_key, ["a", True])
-        self.accept("a-up", self.set_key, ["a", False])
-        self.accept("s", self.set_key, ["s", True])
-        self.accept("s-up", self.set_key, ["s", False])
-        self.accept("d", self.set_key, ["d", True])
-        self.accept("d-up", self.set_key, ["d", False])
+        # self.accept("w", self.set_key, ["w", True])
+        # self.accept("w-up", self.set_key, ["w", False])
+        # self.accept("a", self.set_key, ["a", True])
+        # self.accept("a-up", self.set_key, ["a", False])
+        # self.accept("s", self.set_key, ["s", True])
+        # self.accept("s-up", self.set_key, ["s", False])
+        # self.accept("d", self.set_key, ["d", True])
+        # self.accept("d-up", self.set_key, ["d", False])
 
         self.taskMgr.add(self.move, "move")
 
-        self.delta_zoom = 2  # By how many degrees to change FOV
+        # self.delta_zoom = 2  # By how many degrees to change FOV
 
-        self.accept("wheel_up", self.zoom, [-self.delta_zoom])
-        self.accept("wheel_down", self.zoom, [self.delta_zoom])
+        # self.accept("wheel_up", self.zoom, [-self.delta_zoom])
+        # self.accept("wheel_down", self.zoom, [self.delta_zoom])
 
     def show_bbox(self):
         colors = [
@@ -114,15 +268,6 @@ class Room(ShowBase):
                 sphere.setPos(coord[0], coord[1], coord[2])
                 sphere.setColor(*color)
                 sphere.reparentTo(self.environ)
-
-    def toggle_mouse_lock(self):
-        """
-        Toggle mouse lock on/off with Escape.
-        """
-        self.mouse_locked = not self.mouse_locked
-        props = WindowProperties()
-        props.setCursorHidden(self.mouse_locked)
-        self.win.requestProperties(props)
 
     def mouse_look(self, task):
         """
@@ -164,16 +309,6 @@ class Room(ShowBase):
                 # After each frame, move the mouse back to center
         return task.cont
 
-    def set_key(self, key: str, value: bool) -> None:
-        """
-        Store whether a key is currently held down.
-
-        Args:
-            key (str): Which key it is.
-            value (bool): Pressed or not.
-        """
-        self.keys[key] = value
-
     def move(self, task):
         """
         Moves the camera based on the WASD inputs
@@ -193,26 +328,6 @@ class Room(ShowBase):
             self.camera.setX(self.camera, self.move_speed * dt)
 
         return task.cont
-
-    def zoom(self, delta: int) -> None:
-        """
-        Zoom helper function used for increasing/decreasing FOV
-
-        Args:
-            delta (int): Degrees by which to reduce FOV with each scroll tick.
-        """
-        fov = self.camLens.getFov()
-        new_fov = max(0.1, min(100, fov[0] + delta))
-        self.camLens.setFov(new_fov)
-
-    def control_speed(self, delta: int) -> None:
-        """
-        Speed control helper function for increasing/decreasing movement speed
-
-        Args:
-            delta (int): By how many units/s to change speed.
-        """
-        self.move_speed = max(0.1, min(10, self.move_speed + delta))
 
 
 if __name__ == "__main__":
