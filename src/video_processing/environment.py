@@ -119,7 +119,7 @@ def toggle_mouse_lock(room_state: RoomState) -> None:
 
     Args:
         room_state (RoomState): State container with window, camera, and lock flag.
-    """src/video_processing/environment.py
+    """
     room_state.mouse_locked = not room_state.mouse_locked
     props = WindowProperties()
     props.setCursorHidden(room_state.mouse_locked)
@@ -160,6 +160,68 @@ def env_setup(loader: Loader, parent: NodePath, room_state: RoomState) -> NodePa
     room_state.window.requestProperties(props)
 
     return env
+
+
+def mouse_look(self, task):
+    """
+    The method to calculate the location of the actual camera.
+
+    Args:
+        task (Task): Task object automatically passed by taskMgr. Provides frame timing.
+    """
+    if (
+        self.mouse_locked and self.mouseWatcherNode.hasMouse()
+    ):  # Check if mouse is in the window
+        # Get window center in pixels
+        cx = self.win.getXSize() // 2
+        cy = self.win.getYSize() // 2
+
+        # Current mouse position (normalized coordinates)
+        nx = self.mouseWatcherNode.getMouseX()
+        ny = self.mouseWatcherNode.getMouseY()
+        # Current mouse position in pixels (converts normalized)
+        px = round((nx + 1) * 0.5 * self.win.getXSize())
+        py = round((1 - (ny + 1) * 0.5) * self.win.getYSize())
+
+        # Distance from center
+        dx = px - cx
+        dy = cy - py  # Reversed for natural mouse movement
+
+        # Dead zone to ignore sub-pixel noise
+        if abs(dx) > 1 or abs(dy) > 1:
+            self.heading -= dx * self.sensitivity
+            self.pitch = max(
+                -80, min(80, self.pitch + dy * self.sensitivity)
+            )  # Clamps the vertical degrees to 80 degrees horizontally and vertically
+            self.camera.setHpr(
+                self.heading, self.pitch, 0
+            )  # Applies the rotation to the camera
+
+            # Makes sure the cursor is always centered at the middle of the screen
+            self.win.movePointer(0, cx, cy)
+            # After each frame, move the mouse back to center
+    return task.cont
+
+
+def move(self, task):
+    """
+    Moves the camera based on the WASD inputs
+
+    Args:
+        task (Task): Task object.
+    """
+    dt = globalClock.getDt()  # Number of seconds since last frame so that movement speed is consistent across monitors
+
+    if self.keys["w"]:
+        self.camera.setY(self.camera, self.move_speed * dt)
+    if self.keys["s"]:
+        self.camera.setY(self.camera, -self.move_speed * dt)
+    if self.keys["a"]:
+        self.camera.setX(self.camera, -self.move_speed * dt)
+    if self.keys["d"]:
+        self.camera.setX(self.camera, self.move_speed * dt)
+
+    return task.cont
 
 
 class Room(ShowBase):
@@ -248,86 +310,6 @@ class Room(ShowBase):
 
         # self.accept("wheel_up", self.zoom, [-self.delta_zoom])
         # self.accept("wheel_down", self.zoom, [self.delta_zoom])
-
-    def show_bbox(self):
-        colors = [
-            (1, 0, 0, 1),
-            (0, 1, 0, 1),
-            (0, 0, 1, 1),
-            (1, 1, 0, 1),
-            (1, 0, 1, 1),
-            (0, 1, 1, 1),
-            (1, 0.5, 0, 1),
-            (0.5, 0, 1, 1),
-        ]
-        for i, (obj_name, coords) in enumerate(self.aggregations.items()):
-            color = colors[i % len(colors)]
-            for coord in coords:
-                sphere = self.loader.loadModel("models/misc/sphere")
-                sphere.setScale(0.02)
-                sphere.setPos(coord[0], coord[1], coord[2])
-                sphere.setColor(*color)
-                sphere.reparentTo(self.environ)
-
-    def mouse_look(self, task):
-        """
-        The method to calculate the location of the actual camera.
-
-        Args:
-            task (Task): Task object automatically passed by taskMgr. Provides frame timing.
-        """
-        if (
-            self.mouse_locked and self.mouseWatcherNode.hasMouse()
-        ):  # Check if mouse is in the window
-            # Get window center in pixels
-            cx = self.win.getXSize() // 2
-            cy = self.win.getYSize() // 2
-
-            # Current mouse position (normalized coordinates)
-            nx = self.mouseWatcherNode.getMouseX()
-            ny = self.mouseWatcherNode.getMouseY()
-            # Current mouse position in pixels (converts normalized)
-            px = round((nx + 1) * 0.5 * self.win.getXSize())
-            py = round((1 - (ny + 1) * 0.5) * self.win.getYSize())
-
-            # Distance from center
-            dx = px - cx
-            dy = cy - py  # Reversed for natural mouse movement
-
-            # Dead zone to ignore sub-pixel noise
-            if abs(dx) > 1 or abs(dy) > 1:
-                self.heading -= dx * self.sensitivity
-                self.pitch = max(
-                    -80, min(80, self.pitch + dy * self.sensitivity)
-                )  # Clamps the vertical degrees to 80 degrees horizontally and vertically
-                self.camera.setHpr(
-                    self.heading, self.pitch, 0
-                )  # Applies the rotation to the camera
-
-                # Makes sure the cursor is always centered at the middle of the screen
-                self.win.movePointer(0, cx, cy)
-                # After each frame, move the mouse back to center
-        return task.cont
-
-    def move(self, task):
-        """
-        Moves the camera based on the WASD inputs
-
-        Args:
-            task (Task): Task object.
-        """
-        dt = globalClock.getDt()  # Number of seconds since last frame so that movement speed is consistent across monitors
-
-        if self.keys["w"]:
-            self.camera.setY(self.camera, self.move_speed * dt)
-        if self.keys["s"]:
-            self.camera.setY(self.camera, -self.move_speed * dt)
-        if self.keys["a"]:
-            self.camera.setX(self.camera, -self.move_speed * dt)
-        if self.keys["d"]:
-            self.camera.setX(self.camera, self.move_speed * dt)
-
-        return task.cont
 
 
 if __name__ == "__main__":
