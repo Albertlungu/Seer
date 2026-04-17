@@ -14,8 +14,6 @@ import numpy as np
 
 from src.utils.constants import (
     BASE_MOVEMENT_SPEED,
-    LOG_FADE_END,
-    LOG_FADE_START,
     LOG_MOL_DISTANCE,
     LOG_ROOM_DISTANCE,
     ROOM_REFERENCE_DISTANCE,
@@ -42,8 +40,6 @@ class ZoomState:
     log_distance: float = LOG_ROOM_DISTANCE
     target_point: np.ndarray = field(default_factory=lambda: np.zeros(3))
     target_object_key: str | None = None
-    room_alpha: float = 1.0
-    mol_alpha: float = 0.0
     mode: ViewMode = ViewMode.ROOM
     distance: float = 10.0**LOG_ROOM_DISTANCE
 
@@ -61,29 +57,6 @@ def compute_clip_planes(distance: float) -> tuple[float, float]:
     near = max(distance * 0.001, 1e-15)
     far = max(distance * 1000.0, 10.0)
     return near, far
-
-
-def compute_fade(
-    log_distance: float, fade_start: float, fade_end: float
-) -> tuple[float, float]:
-    """
-    Returns (room_alpha, mol_alpha) for the current log-distance. Room alpha is 1.0 when above fade_start,
-    0.0 below fade_end, molecules are inverse.
-
-    Args:
-        log_distance (float): Current log10(camera_distance_metres).
-        fade_start (float): Log10 distance where room begins fading (closer to 0)
-        fade_end (float): Log10 distance where room is fully gone (more negative)
-
-    Returns:
-        tuple[float, float]: Tuple of (room_alpha, mol_alpha), each in [0.0, 1.0]
-    """
-    if log_distance >= fade_start:
-        return 1.0, 0.0
-    if log_distance <= fade_end:
-        return 0.0, 1.0
-    t = (log_distance - fade_end) / (fade_start - fade_end)
-    return t, 1.0 - t
 
 
 def compute_movement_speed(distance: float, base_speed: float) -> float:
@@ -123,7 +96,7 @@ class ZoomController:
     Manages zoom state and computes per-frame derived values.
 
     Attributes:
-        state: Mutable zoom state containing the current log-distance, target point, selected object key, alpha values, and mode.
+        state: Mutable zoom state containing the current log-distance, target point, selected object key, and mode.
         _prev_mode: ViewMode from previous update call
         _target_locked: Whether the current zoom target has been set.
     """
@@ -155,15 +128,10 @@ class ZoomController:
         """
         self.state.distance = 10**self.state.log_distance
 
-        room_alpha, mol_alpha = compute_fade(
-            self.state.log_distance, fade_start=LOG_FADE_START, fade_end=LOG_FADE_END
-        )
-        self.state.room_alpha, self.state.mol_alpha = room_alpha, mol_alpha
-
         self._prev_mode = self.state.mode
-        if self.state.log_distance >= LOG_FADE_START:
+        if self.state.log_distance >= LOG_ROOM_DISTANCE:
             self.state.mode = ViewMode.ROOM
-        elif self.state.log_distance <= LOG_FADE_END:
+        elif self.state.log_distance <= LOG_MOL_DISTANCE:
             self.state.mode = ViewMode.MOLECULAR
         else:
             self.state.mode = ViewMode.TRANSITIONING

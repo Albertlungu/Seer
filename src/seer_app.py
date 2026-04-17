@@ -7,28 +7,22 @@ Main Seer app maker. Amalgamates everything into a single runnable file.
 """
 
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import TransparencyAttrib
 
 from src.video_processing.environment import (
     AGGREGATION_PATH,
     RoomState,
+    decrease_fov,
     env_setup,
+    increase_fov,
     mouse_look,
     move,
 )
-from src.zoom.zoom_controller import (
-    ZoomController,
-    compute_clip_planes,
-    compute_movement_speed,
-)
-from src.utils.constants import BASE_MOVEMENT_SPEED
 
 
 class SeerApp(ShowBase):
     def __init__(
         self,
         room_state: RoomState | None = None,
-        zoom_controller: ZoomController | None = None,
         aggregation_path: str | None = AGGREGATION_PATH,
         debug: bool = False,
     ) -> None:
@@ -37,7 +31,6 @@ class SeerApp(ShowBase):
 
         Args:
             room_state (RoomState | None, optional): The current room state with all necessary default values. Defaults to None.
-            zoom_controller (ZoomController | None, optional): The zoom controller class to manage transitions. Defaults to None.
             aggregation_path (str | None, optional): The path to the aggregations JSON. Defaults to AGGREGATION_PATH.
             debug (bool, optional): Whether to print debug statements or not. Defaults to False.
 
@@ -49,14 +42,10 @@ class SeerApp(ShowBase):
         self.disableMouse()
 
         self.room_root = self.render.attachNewNode("room_root")
-        self.mol_root = self.render.attachNewNode("mol_root")
-        self.room_root.setTransparency(TransparencyAttrib.MAlpha)
-        self.mol_root.setTransparency(TransparencyAttrib.MAlpha)
+        self.room_root.show()
 
         if room_state is None:
             room_state = RoomState(window=self.win, camera=self.camLens)
-
-        self.zoom_controller = zoom_controller if zoom_controller else ZoomController()
 
         self.room_state = room_state
         self.keys = self.room_state.mvt_key_states
@@ -81,7 +70,6 @@ class SeerApp(ShowBase):
 
         self.taskMgr.add(self._mouse_look_task, "mouse-look")
         self.taskMgr.add(self._move_task, "move")
-        self.taskMgr.add(self._zoom_update_task, "zoom-update")
 
         for key, func, args in self.room_state.movement_commands:
             if args is not None:
@@ -101,36 +89,15 @@ class SeerApp(ShowBase):
 
     def _on_wheel_up(self) -> None:
         """
-        On zoom in
+        On zoom in.
         """
-        self.zoom_controller.on_scroll(-1)
+        increase_fov(self.room_state)
 
     def _on_wheel_down(self) -> None:
         """
-        On zoom out
+        On zoom out.
         """
-        self.zoom_controller.on_scroll(1)
-
-    def _zoom_update_task(self, task):
-        self.zoom_controller.update()
-        state = self.zoom_controller.state
-
-        if self.camLens is None:
-            return task.cont
-
-        near_plane, far_plane = compute_clip_planes(state.distance)
-        self.camLens.setNear(near_plane)
-        self.camLens.setFar(far_plane)
-
-        self.room_root.setColorScale(1.0, 1.0, 1.0, state.room_alpha)
-        self.mol_root.setColorScale(1.0, 1.0, 1.0, state.mol_alpha)
-
-        self.move_speed = compute_movement_speed(
-            distance=state.distance,
-            base_speed=self.room_state.current_move_speed,
-        )
-
-        return task.cont
+        decrease_fov(self.room_state)
 
 
 if __name__ == "__main__":
