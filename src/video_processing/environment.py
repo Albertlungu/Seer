@@ -47,7 +47,7 @@ class RoomState:
     current_move_speed: float = 1.5
 
     fov_delta: float = 2.0
-    move_speed_delta: float = 0.1
+    move_speed_delta: float = 0.5
 
     default_move_speed: float = 1.5
     default_sensitivity: float = 0.1
@@ -68,7 +68,10 @@ class RoomState:
             ("d-up", set_key, ["d", False]),
             # Speed
             ("shift-=", control_speed, None),
-            ("-", control_speed, None),
+            ("-", decrease_speed, None),
+            # FOV
+            ("wheel_up", decrease_fov, None),
+            ("wheel_down", zoom, None),
             # Misc
             ("escape", toggle_mouse_lock, None),
         ]
@@ -109,6 +112,30 @@ def control_speed(room_state: RoomState) -> None:
     room_state.current_move_speed = max(
         0.1, min(10, room_state.current_move_speed + room_state.move_speed_delta)
     )
+
+
+def decrease_speed(room_state: RoomState) -> None:
+    """
+    Decrease movement speed by move_speed_delta, clamped to [0.1, 10.0].
+
+    Args:
+        room_state (RoomState): State container with current speed and delta.
+    """
+    room_state.current_move_speed = max(
+        0.1, min(10, room_state.current_move_speed - room_state.move_speed_delta)
+    )
+
+
+def decrease_fov(room_state: RoomState) -> None:
+    """
+    Decrease camera field of view by fov_delta.
+
+    Args:
+        room_state (RoomState): State container with current FOV and fov_delta.
+    """
+    fov = room_state.camera.getFov()
+    new_fov = max(0.1, min(100, fov[0] - room_state.fov_delta))
+    room_state.camera.setFov(new_fov)
 
 
 def toggle_mouse_lock(room_state: RoomState) -> None:
