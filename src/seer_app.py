@@ -25,18 +25,16 @@ class SeerApp(ShowBase):
         debug: bool = False,
     ) -> None:
         super().__init__()
+
+        self.room_root = self.render.attachNewNode("room_root")
+        self.mol_root = self.render.attachNewNode("mol_root")
+
         self.disableMouse()
 
         if room_state is None:
             room_state = RoomState(window=self.win, camera=self.camLens)
 
         self.room_state = room_state
-        self.keys = self.room_state.mvt_key_states
-        self.move_speed = self.room_state.current_move_speed
-        self.mouse_locked = self.room_state.mouse_locked
-        self.sensitivity = self.room_state.default_sensitivity
-        self.heading = 0.0
-        self.pitch = 0.0
 
         if aggregation_path:
             self.room_state.aggregation_path = aggregation_path
@@ -46,7 +44,7 @@ class SeerApp(ShowBase):
 
         if self.loader:
             self.room_geo = env_setup(
-                loader=self.loader, parent=self.render, room_state=self.room_state
+                loader=self.loader, parent=self.room_root, room_state=self.room_state
             )
         else:
             raise ValueError("Missing loader.")
