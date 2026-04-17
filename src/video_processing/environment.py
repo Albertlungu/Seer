@@ -67,8 +67,8 @@ class RoomState:
             ("d", set_key, ["d", True]),
             ("d-up", set_key, ["d", False]),
             # Speed
-            ("shift-=", control_speed, [0.1]),
-            ("-", control_speed, [-0.1]),
+            ("shift-=", control_speed, None),
+            ("-", control_speed, None),
             # Misc
             ("escape", toggle_mouse_lock, None),
         ]
