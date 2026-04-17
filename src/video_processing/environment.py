@@ -67,11 +67,11 @@ class RoomState:
             ("d", set_key, ["d", True]),
             ("d-up", set_key, ["d", False]),
             # Speed
-            ("shift-=", control_speed, None),
+            ("shift-=", increase_speed, None),
             ("-", decrease_speed, None),
             # FOV
             ("wheel_up", decrease_fov, None),
-            ("wheel_down", zoom, None),
+            ("wheel_down", increase_fov, None),
             # Misc
             ("escape", toggle_mouse_lock, None),
         ]
@@ -90,7 +90,7 @@ def set_key(room_state: RoomState, key: str, value: bool) -> None:
     room_state.mvt_key_states[key] = value
 
 
-def zoom(room_state: RoomState) -> None:
+def increase_fov(room_state: RoomState) -> None:
     """
     Adjust the camera field of view by fov_delta.
 
@@ -102,7 +102,7 @@ def zoom(room_state: RoomState) -> None:
     room_state.camera.setFov(new_fov)
 
 
-def control_speed(room_state: RoomState) -> None:
+def increase_speed(room_state: RoomState) -> None:
     """
     Adjust movement speed by move_speed_delta, clamped to [0.1, 10.0].
 
