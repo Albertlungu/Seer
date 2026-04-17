@@ -47,7 +47,7 @@ class RoomState:
     current_move_speed: float = 1.5
 
     fov_delta: float = 2.0
-    move_speed_delta: float = 0.5
+    move_speed_delta: float = 1
 
     default_move_speed: float = 1.5
     default_sensitivity: float = 0.1
