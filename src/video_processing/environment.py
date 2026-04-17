@@ -70,8 +70,8 @@ class RoomState:
             ("shift-=", increase_speed, None),
             ("-", decrease_speed, None),
             # FOV
-            ("wheel_up", decrease_fov, None),
-            ("wheel_down", increase_fov, None),
+            # ("wheel_up", decrease_fov, None),
+            # ("wheel_down", increase_fov, None),
             # Misc
             ("escape", toggle_mouse_lock, None),
         ]
