@@ -11,7 +11,7 @@ Creates the 3D environment in which the user can move around.
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from direct.showbase.Loader import Loader
 from direct.showbase.ShowBase import ShowBase
@@ -24,8 +24,6 @@ from panda3d.core import (
     WindowProperties,
     loadPrcFileData,
 )
-
-from src.utils.json_io import load_json
 
 loadPrcFileData("", "load-file-type p3assimp")
 
@@ -123,7 +121,7 @@ def toggle_mouse_lock(room_state: RoomState) -> None:
     room_state.mouse_locked = not room_state.mouse_locked
     props = WindowProperties()
     props.setCursorHidden(room_state.mouse_locked)
-    room_state.win.requestProperties(props)
+    room_state.window.requestProperties(props)
 
 
 def env_setup(loader: Loader, parent: NodePath, room_state: RoomState) -> NodePath:
@@ -142,18 +140,18 @@ def env_setup(loader: Loader, parent: NodePath, room_state: RoomState) -> NodePa
     """
 
     env: NodePath = loader.loadModel(
-        "data/reconstructions/obj/albert_room.obj"
+        "/Users/albertlungu/Local/GitHub/Seer/data/reconstructions/obj/albert_room.obj"
     )  # If there are issues, revert to absolute path
     env.reparentTo(parent)
-    env.setHpr(RoomState.default_hpr)
+    env.setHpr(room_state.default_hpr)
     env.setTwoSided(True)
 
     center: tuple[Point3, Point3] = env.getTightBounds()
     mid: Point3 = (center[0] + center[1]) / 2
     env.setPos(-mid.x, -mid.y, -mid.z)
 
-    RoomState.camera.setNear(RoomState.default_near)
-    RoomState.camera.setFov(RoomState.default_fov)
+    room_state.camera.setNear(room_state.default_near)
+    room_state.camera.setFov(room_state.default_fov)
 
     props = WindowProperties()
     props.setCursorHidden(True)
@@ -238,27 +236,12 @@ class Room(ShowBase):
         self.environ = self.loader.loadModel(
             "/Users/albertlungu/Local/GitHub/Seer/data/reconstructions/obj/albert_room.obj"
         )  # Loads the 3D model
-        self.environ.reparentTo(self.render)  # The root of the scene (the topmost node)
-        self.environ.setP(90)  # Sets the pitch (rotation around x axis) to 90 deg
-        self.environ.setTwoSided(True)
-
-        center = self.environ.getTightBounds()  # Returns a tuple of the minimum and maximum corners of the AABB (axis-aligned bounding)
-        mid = (center[0] + center[1]) / 2  # Finds the geometric center of the AABB
-        self.environ.setPos(-mid.x, -mid.y, -mid.z)  # Moves to origin (middle of room)
-
-        self.camLens.setNear(0.01)  # Renders things that are very close to camera
-        self.camLens.setFov(90)
 
         self.sensitivity = (
             0.1  # Sens in degrees of cam rotation per pixel of mouse movement
         )
         self.heading = 0  # Left/Right rotation
         self.pitch = 0  # Up/Down tilt
-
-        # Hide cursor and center it
-        props = WindowProperties()
-        props.setCursorHidden(True)
-        self.win.requestProperties(props)
 
         # Register mouse_look as a per-frame task
         self.taskMgr.add(self.mouse_look, "mouse-look")
