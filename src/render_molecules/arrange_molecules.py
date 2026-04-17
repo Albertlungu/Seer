@@ -13,7 +13,12 @@ import math
 import numpy as np
 from direct.gui.DirectGui import DirectLabel, DirectSlider
 from direct.showbase.ShowBase import ShowBase
+from panda3d.core import NodePath
 
+from src.render_molecules.arrangement.geometry import (
+    calculate_environment_center_of_mass,
+    compute_bounding_sphere_radius,
+)
 from src.render_molecules.arrangement.placement import PlacementConfig, place_molecules
 from src.render_molecules.arrangement.renderer import (
     render_object_state,
@@ -117,14 +122,24 @@ def build_object_state(
     )
 
 
-def run_arrangement() -> None:
+def load_molecules_for_object(
+    object_key: str,
+    data: dict,
+    parent: NodePath,
+    base: ShowBase,
+) -> tuple[ObjectState, dict[int, NodePath]]:
     """
-    Runs the full pipeline: load JSON, build templates, place molecules,
-    build Panda3D scene, and start the app loop.
-    """
-    data = load_json(_JSON_FILENAME)
+    Run the arrangement pipeline for one object and render it under a parent node.
 
-    object_key = next(iter(data))
+    Args:
+        object_key (str): Object key from the aggregated JSON.
+        data (dict): Full aggregated JSON dictionary.
+        parent (NodePath): Scene-graph parent for rendered molecule nodes.
+        base (ShowBase): Panda3D app instance used by the renderer.
+
+    Returns:
+        tuple[ObjectState, dict[int, NodePath]]: The placed object state and rendered roots.
+    """
     object_data = data[object_key]
 
     templates = build_templates_from_object(object_data)
@@ -141,19 +156,10 @@ def run_arrangement() -> None:
     target_counts = {tid: _TARGET_COUNT_PER_TEMPLATE for tid in templates}
     total_target = sum(target_counts.values())
 
-    # Calculate frontier radius based on molecular scale
-    # Use the maximum bounding sphere radius among all templates
-    from src.render_molecules.arrangement.geometry import compute_bounding_sphere_radius
-
     max_radius = max(
         compute_bounding_sphere_radius(template) for template in templates.values()
     )
-    # Set frontier radius to be several molecular diameters
     frontier_radius = max_radius * 6.0
-
-    _bb_min = np.minimum.reduce(object_state.box_bottom.T)
-    _bb_max = np.maximum.reduce(object_state.box_top.T)
-    box_diag = float(np.linalg.norm(_bb_max - _bb_min))
 
     config = PlacementConfig(
         seed=_RNG_SEED,
@@ -173,8 +179,33 @@ def run_arrangement() -> None:
         target_counts=target_counts,
     )
 
+    instance_roots = render_object_state(
+        base=base,
+        parent=parent,
+        object_state=object_state,
+    )
+    return object_state, instance_roots
+
+
+def run_arrangement() -> None:
+    """
+    Runs the full pipeline: load JSON, build templates, place molecules,
+    build Panda3D scene, and start the app loop.
+    """
+    data = load_json(_JSON_FILENAME)
+
+    object_key = next(iter(data))
     base = ShowBase()
     base.setBackgroundColor(0.05, 0.05, 0.08, 1.0)
+    if base.camLens is None:
+        raise RuntimeError("Camera lens was not initialized")
+
+    object_state, _instance_roots = load_molecules_for_object(
+        object_key=object_key,
+        data=data,
+        parent=base.render,
+        base=base,
+    )
 
     # Adjust camera clipping planes for better zoom range
     base.camLens.setNear(0.01)
@@ -194,13 +225,17 @@ def run_arrangement() -> None:
     base.accept("wheel_up", zoom_in)
     base.accept("wheel_down", zoom_out)
 
+    box_min = np.minimum.reduce(object_state.box_bottom.T)
+    box_max = np.maximum.reduce(object_state.box_top.T)
+    box_diag = float(np.linalg.norm(box_max - box_min))
+    max_radius = max(
+        compute_bounding_sphere_radius(template)
+        for template in object_state.templates.values()
+    )
+
     # Position camera to see the molecular cluster (not the entire box)
     if object_state.instances:
         # Calculate extent of placed molecules
-        from src.render_molecules.arrangement.geometry import (
-            calculate_environment_center_of_mass,
-        )
-
         positions = []
         for instance in object_state.instances.values():
             template = object_state.templates[instance.template_id]
@@ -241,12 +276,6 @@ def run_arrangement() -> None:
         )
         base.cam.lookAt(float(center[0]), float(center[1]), float(center[2]))
 
-    render_object_state(
-        base=base,
-        parent=base.render,
-        object_state=object_state,
-    )
-
     # Add atom scale slider
     def update_atom_scale():
         scale = slider["value"]
@@ -270,7 +299,7 @@ def run_arrangement() -> None:
         frameColor=(0, 0, 0, 0),
     )
 
-    info_label = DirectLabel(
+    _info_label = DirectLabel(
         text="1.0 = van der Waals | ~0.4 = covalent",
         pos=(-0.85, 0, -0.95),
         scale=0.04,
