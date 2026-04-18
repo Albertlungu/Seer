@@ -25,9 +25,11 @@ from panda3d.core import (
     loadPrcFileData,
 )
 
+from src.utils.constants import FINAL_AGGREGATED
+
 loadPrcFileData("", "load-file-type p3assimp")
 
-AGGREGATION_PATH = "./data/vision_json/aggregations.json"
+AGGREGATION_PATH = f"./data/vision_json/{FINAL_AGGREGATED}"
 
 
 @dataclass
@@ -45,9 +47,19 @@ class RoomState:
 
     current_fov: float = 90.0
     current_move_speed: float = 1.5
+    molecular_mode: bool = False
+    target_point: Point3 | None = None
+    target_object_key: str | None = None
+    target_locked: bool = False
 
     fov_delta: float = 2.0
     move_speed_delta: float = 1
+
+    max_room_fov: float = 100.0
+    min_room_fov: float = 0.1
+    min_molecular_fov: float = 0.01
+    max_room_speed: float = 10.0
+    min_room_speed: float = 0.1
 
     default_move_speed: float = 1.5
     default_sensitivity: float = 0.1
@@ -98,8 +110,10 @@ def increase_fov(room_state: RoomState) -> None:
         room_state (RoomState): State container with current FOV and fov_delta.
     """
     fov = room_state.camera.getFov()
-    new_fov = max(0.1, min(100, fov[0] + room_state.fov_delta))
+    new_fov = min(room_state.max_room_fov, fov[0] + room_state.fov_delta)
     room_state.camera.setFov(new_fov)
+    room_state.current_fov = new_fov
+    room_state.molecular_mode = new_fov <= room_state.min_room_fov
 
 
 def increase_speed(room_state: RoomState) -> None:
@@ -134,8 +148,10 @@ def decrease_fov(room_state: RoomState) -> None:
         room_state (RoomState): State container with current FOV and fov_delta.
     """
     fov = room_state.camera.getFov()
-    new_fov = max(0.1, min(100, fov[0] - room_state.fov_delta))
+    new_fov = max(room_state.min_molecular_fov, fov[0] - room_state.fov_delta)
     room_state.camera.setFov(new_fov)
+    room_state.current_fov = new_fov
+    room_state.molecular_mode = new_fov <= room_state.min_room_fov
 
 
 def toggle_mouse_lock(room_state: RoomState) -> None:
@@ -179,6 +195,8 @@ def env_setup(loader: Loader, parent: NodePath, room_state: RoomState) -> NodePa
 
     room_state.camera.setNear(room_state.default_near)
     room_state.camera.setFov(room_state.default_fov)
+    room_state.current_fov = room_state.default_fov
+    room_state.molecular_mode = room_state.current_fov <= room_state.min_room_fov
 
     props = WindowProperties()
     props.setCursorHidden(True)
