@@ -76,7 +76,9 @@ class SeerApp(ShowBase):
 
         self.room_data = load_json(FINAL_AGGREGATED)
         self.room_picker = RaycastPicker(
-            camera_node=self.camNode, target_root=self.room_geo
+            camera_node=self.camera,
+            cam_node=self.camNode,
+            target_root=self.room_geo,
         )
         self.room_picker.mark_pickable(self.room_geo)
         self.object_bounds = self._build_object_bounds(self.room_data)
@@ -104,15 +106,18 @@ class SeerApp(ShowBase):
         """
         On zoom in.
         """
+        was_molecular = self.room_state.molecular_mode
         increase_fov(self.room_state)
-        self._clear_target_lock()
+        if was_molecular and not self.room_state.molecular_mode:
+            self._clear_target_lock()
 
     def _on_wheel_down(self) -> None:
         """
         On zoom out.
         """
+        was_molecular = self.room_state.molecular_mode
         decrease_fov(self.room_state)
-        if self.room_state.molecular_mode:
+        if not was_molecular and self.room_state.molecular_mode:
             self._lock_target_from_center()
 
     def _build_object_bounds(
