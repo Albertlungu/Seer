@@ -13,6 +13,7 @@ from panda3d.core import Point3
 
 from src.utils.constants import FINAL_AGGREGATED
 from src.utils.json_io import load_json
+from src.utils.type_annotations import Aggregations, Bounds
 from src.video_processing.environment import (
     AGGREGATION_PATH,
     RoomState,
@@ -81,7 +82,6 @@ class SeerApp(ShowBase):
             target_root=self.room_geo,
         )
         self.room_picker.mark_pickable(self.room_geo)
-        self.object_bounds = self._build_object_bounds(self.room_data)
 
         self.taskMgr.add(self._mouse_look_task, "mouse-look")
         self.taskMgr.add(self._move_task, "move")
@@ -96,10 +96,28 @@ class SeerApp(ShowBase):
         self.accept("wheel_down", self._on_wheel_down)
 
     def _mouse_look_task(self, task):
+        """
+        Proxy task that keeps local mouse-lock state in sync and delegates look updates.
+
+        Args:
+            task: Panda3D task object.
+
+        Returns:
+            Any: Task continuation token from `mouse_look`.
+        """
         self.mouse_locked = self.room_state.mouse_locked
         return mouse_look(self, task)
 
     def _move_task(self, task):
+        """
+        Proxy task that applies per-frame movement updates.
+
+        Args:
+            task: Panda3D task object.
+
+        Returns:
+            Any: Task continuation token from `move`.
+        """
         return move(self, task)
 
     def _on_wheel_up(self) -> None:
@@ -120,36 +138,43 @@ class SeerApp(ShowBase):
         if not was_molecular and self.room_state.molecular_mode:
             self._lock_target_from_center()
 
-    def _build_object_bounds(
-        self, data: dict
-    ) -> dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]]:
-        bounds: dict[
-            str, tuple[tuple[float, float, float], tuple[float, float, float]]
-        ] = {}
-
-        for object_key, object_data in data.items():
-            corners = object_data["corners"]["bottom"] + object_data["corners"]["top"]
-            mins = cast(
-                tuple[float, float, float],
-                tuple(
-                    min(float(point[index]) for point in corners) for index in range(3)
-                ),
-            )
-            maxs = cast(
-                tuple[float, float, float],
-                tuple(
-                    max(float(point[index]) for point in corners) for index in range(3)
-                ),
-            )
-            bounds[object_key] = (mins, maxs)
-
-        return bounds
-
     def _find_object_key_for_point(self, point: Point3) -> str:
+        """
+        Resolves a world-space point to the nearest aggregated object key.
+
+        Args:
+            point (Point3): Hit point in world/object space.
+
+        Returns:
+            str: Matching object key from aggregated room data.
+
+        Raises:
+            RuntimeError: If no object candidates exist in loaded room data.
+        """
         candidate_key: str | None = None
         candidate_distance: float | None = None
 
-        for object_key, (mins, maxs) in self.object_bounds.items():
+        for object_key, object_data in self.room_data.items():
+            corners = object_data["corners"]["bottom"] + object_data["corners"]["top"]
+            bounds: Bounds = {
+                "mins": cast(
+                    tuple[float, float, float],
+                    tuple(
+                        min(float(corner[index]) for corner in corners)
+                        for index in range(3)
+                    ),
+                ),
+                "maxs": cast(
+                    tuple[float, float, float],
+                    tuple(
+                        max(float(corner[index]) for corner in corners)
+                        for index in range(3)
+                    ),
+                ),
+            }
+            mins = bounds["mins"]
+            maxs = bounds["maxs"]
+
             if all(
                 mins[index] <= coord <= maxs[index]
                 for index, coord in enumerate((point.x, point.y, point.z))
@@ -171,6 +196,9 @@ class SeerApp(ShowBase):
         return candidate_key
 
     def _lock_target_from_center(self) -> None:
+        """
+        Raycasts from screen center and locks room-state target to the selected object.
+        """
         hit = self.room_picker.pick_center()
         if hit is None:
             return
@@ -182,6 +210,9 @@ class SeerApp(ShowBase):
         self.room_state.target_locked = True
 
     def _clear_target_lock(self) -> None:
+        """
+        Clears any currently locked zoom target from room state.
+        """
         self.room_state.target_point = None
         self.room_state.target_object_key = None
         self.room_state.target_locked = False
