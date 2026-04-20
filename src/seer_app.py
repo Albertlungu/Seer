@@ -9,7 +9,7 @@ Main Seer app maker. Amalgamates everything into a single runnable file.
 from typing import cast
 
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import Point3
+from panda3d.core import LineSegs, NodePath, Point3
 
 from src.utils.constants import FINAL_AGGREGATED
 from src.utils.json_io import load_json
@@ -82,9 +82,14 @@ class SeerApp(ShowBase):
             target_root=self.room_geo,
         )
         self.room_picker.mark_pickable(self.room_geo)
+        self._debug_ray_node: NodePath | None = None
+        self._debug_hit_dot: NodePath | None = None
+        self._debug_lock_box: NodePath | None = None
 
         self.taskMgr.add(self._mouse_look_task, "mouse-look")
         self.taskMgr.add(self._move_task, "move")
+        if self.room_state.debug:
+            self.taskMgr.add(self._debug_preview_task, "debug-preview")
 
         for key, func, args in self.room_state.movement_commands:
             if args is not None:
@@ -105,6 +110,18 @@ class SeerApp(ShowBase):
         Returns:
             Any: Task continuation token from `mouse_look`.
         """
+        if self.room_state.molecular_mode and self.room_state.target_locked:
+            mouse_watcher = self.mouseWatcherNode
+            if (
+                self.win is not None
+                and mouse_watcher is not None
+                and mouse_watcher.hasMouse()
+            ):
+                cx = self.win.getXSize() // 2
+                cy = self.win.getYSize() // 2
+                self.win.movePointer(0, cx, cy)
+            return task.cont
+
         self.mouse_locked = self.room_state.mouse_locked
         return mouse_look(self, task)
 
@@ -120,6 +137,35 @@ class SeerApp(ShowBase):
         """
         return move(self, task)
 
+    def _debug_preview_task(self, task):
+        """
+        Continuously renders center-ray and lock-target preview while in room state.
+
+        Args:
+            task: Panda3D task object.
+
+        Returns:
+            Any: Task continuation token.
+        """
+        if not self.room_state.debug:
+            return task.cont
+
+        if self.room_state.molecular_mode:
+            self._clear_debug_visuals()
+            return task.cont
+
+        hit = self.room_picker.pick_center()
+        if hit is None:
+            self._clear_debug_visuals()
+            return task.cont
+
+        _hit_node, hit_point = hit
+        self._draw_debug_raycast(hit_point)
+        object_key = self._find_object_key_for_point(hit_point)
+        self._draw_debug_lock_box(object_key)
+
+        return task.cont
+
     def _on_wheel_up(self) -> None:
         """
         On zoom in.
@@ -133,9 +179,8 @@ class SeerApp(ShowBase):
         """
         On zoom out.
         """
-        was_molecular = self.room_state.molecular_mode
         decrease_fov(self.room_state)
-        if not was_molecular and self.room_state.molecular_mode:
+        if self.room_state.molecular_mode and not self.room_state.target_locked:
             self._lock_target_from_center()
 
     def _find_object_key_for_point(self, point: Point3) -> str:
@@ -201,13 +246,21 @@ class SeerApp(ShowBase):
         """
         hit = self.room_picker.pick_center()
         if hit is None:
+            if self.room_state.debug:
+                self._clear_debug_visuals()
             return
 
         _hit_node, hit_point = hit
+        if self.room_state.debug:
+            self._draw_debug_raycast(hit_point)
+
         object_key = self._find_object_key_for_point(hit_point)
         self.room_state.target_point = hit_point
         self.room_state.target_object_key = object_key
         self.room_state.target_locked = True
+
+        if self.room_state.debug:
+            self._draw_debug_lock_box(object_key)
 
     def _clear_target_lock(self) -> None:
         """
@@ -216,8 +269,99 @@ class SeerApp(ShowBase):
         self.room_state.target_point = None
         self.room_state.target_object_key = None
         self.room_state.target_locked = False
+        if self.room_state.debug:
+            self._clear_debug_visuals()
+
+    def _draw_debug_raycast(self, hit_point: Point3) -> None:
+        """
+        Draws a debug line from camera origin to raycast hit, plus a hit marker dot.
+
+        Args:
+            hit_point (Point3): Raycast hit point in `room_geo` local coordinates.
+        """
+        if self._debug_ray_node is not None:
+            self._debug_ray_node.removeNode()
+            self._debug_ray_node = None
+
+        if self._debug_hit_dot is not None:
+            self._debug_hit_dot.setPos(hit_point)
+
+        camera_origin = self.room_geo.getRelativePoint(self.camera, Point3(0, 0, 0))
+
+        ray_line = LineSegs("debug_raycast")
+        ray_line.setThickness(2.0)
+        ray_line.setColor(0.2, 1.0, 0.2, 1.0)
+        ray_line.moveTo(camera_origin)
+        ray_line.drawTo(hit_point)
+        self._debug_ray_node = self.room_geo.attachNewNode(ray_line.create())
+
+        if self.loader is None or self._debug_hit_dot is not None:
+            return
+
+        hit_dot = cast(NodePath, self.loader.loadModel("models/misc/sphere"))
+        hit_dot.reparentTo(self.room_geo)
+        hit_dot.setPos(hit_point)
+        hit_dot.setScale(0.01)
+        hit_dot.setColor(1.0, 0.2, 0.2, 1.0)
+        self._debug_hit_dot = hit_dot
+
+    def _draw_debug_lock_box(self, object_key: str) -> None:
+        """
+        Draws a wireframe box around the object that will be locked.
+
+        Args:
+            object_key (str): Object key selected from aggregated room data.
+        """
+        if self._debug_lock_box is not None:
+            self._debug_lock_box.removeNode()
+            self._debug_lock_box = None
+
+        object_data = self.room_data[object_key]
+        corners = object_data["corners"]["bottom"] + object_data["corners"]["top"]
+        points = [Point3(*corner) for corner in corners]
+
+        edges = [
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 4),
+            (0, 4),
+            (1, 5),
+            (2, 6),
+            (3, 7),
+        ]
+
+        box_lines = LineSegs("debug_lock_box")
+        box_lines.setThickness(2.0)
+        box_lines.setColor(1.0, 0.75, 0.1, 1.0)
+
+        for start_idx, end_idx in edges:
+            box_lines.moveTo(points[start_idx])
+            box_lines.drawTo(points[end_idx])
+
+        self._debug_lock_box = self.room_geo.attachNewNode(box_lines.create())
+
+    def _clear_debug_visuals(self) -> None:
+        """
+        Removes debug ray and target-box visuals from the scene.
+        """
+        if self._debug_ray_node is not None:
+            self._debug_ray_node.removeNode()
+            self._debug_ray_node = None
+
+        if self._debug_hit_dot is not None:
+            self._debug_hit_dot.removeNode()
+            self._debug_hit_dot = None
+
+        if self._debug_lock_box is not None:
+            self._debug_lock_box.removeNode()
+            self._debug_lock_box = None
 
 
 if __name__ == "__main__":
-    app = SeerApp(aggregation_path=AGGREGATION_PATH, debug=False)
+    app = SeerApp(aggregation_path=AGGREGATION_PATH, debug=True)
     app.run()
