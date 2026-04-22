@@ -9,15 +9,29 @@ Main Seer app maker. Amalgamates everything into a single runnable file.
 from typing import Any, cast
 
 import numpy as np
+from direct.gui.DirectGui import DirectLabel, DirectSlider
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import LineSegs, NodePath, Point3, TransparencyAttrib
 
-from src.render_molecules.arrange_molecules import load_molecules_for_object
-from src.render_molecules.arrangement.geometry import (
-    calculate_environment_center_of_mass,
-    compute_bounding_sphere_radius,
+from src.render_molecules.arrange_molecules import build_templates_from_object
+from src.render_molecules.arrangement.geometry import compute_bounding_sphere_radius
+from src.render_molecules.arrangement.placement import PlacementConfig, place_molecules
+from src.render_molecules.arrangement.renderer import (
+    render_object_state,
+    set_atom_scale_factor,
 )
-from src.utils.constants import FADE_FOV_START, FINAL_AGGREGATED
+from src.render_molecules.arrangement.scene_state import MoleculeTemplate, ObjectState
+from src.utils.constants import (
+    CHUNK_MOL_COUNT_PER_TEMPLATE,
+    CHUNK_SIZE_A,
+    FADE_FOV_START,
+    FINAL_AGGREGATED,
+    LOAD_RADIUS_CHUNKS,
+    MAX_CHUNKS_PER_FRAME,
+    MOL_CAM_SPEED_A,
+    MOL_VIEW_SCALE,
+    UNLOAD_RADIUS_CHUNKS,
+)
 from src.utils.json_io import load_json
 from src.utils.type_annotations import Aggregations, Bounds
 from src.video_processing.environment import (
@@ -71,6 +85,13 @@ class SeerApp(ShowBase):
         self._mol_instance_roots: dict[int, NodePath] = {}
         self._in_molecular_scene: bool = False
 
+        self._loaded_chunks: dict[tuple[int, int, int], NodePath] = {}
+        self._mol_templates: dict[int, MoleculeTemplate] | None = None
+        self._mol_origin: Point3 | None = None
+        self._room_move_speed: float = self.room_state.current_move_speed
+        self._atom_slider: DirectSlider | None = None
+        self._atom_label: DirectLabel | None = None
+
         if room_state is None:
             room_state = RoomState(window=self.win, camera=self.camLens)
 
@@ -109,6 +130,8 @@ class SeerApp(ShowBase):
         self.taskMgr.add(self._mouse_look_task, "mouse-look")
         self.taskMgr.add(self._move_task, "move")
         self.taskMgr.add(self._bg_fade_task, "bg-fade")
+        self._build_atom_slider()
+        self.taskMgr.add(self._chunk_stream_task, "chunk-stream")
         if self.room_state.debug:
             self.taskMgr.add(self._debug_preview_task, "debug-preview")
 
@@ -120,6 +143,39 @@ class SeerApp(ShowBase):
 
         self.accept("wheel_up", self._on_wheel_up)
         self.accept("wheel_down", self._on_wheel_down)
+
+    def _build_atom_slider(self) -> None:
+        """
+        Creates the atom scale slider and label, which are hidden until molecular mode is entered.
+        """
+        self._atom_slider = DirectSlider(
+            range=(0.1, 1.0),
+            value=1.0,
+            pageSize=0.1,
+            command=self._on_atom_scale_changed,
+            pos=(-0.85, 0, -0.85),
+            scale=0.35,
+        )
+        self._atom_label = DirectLabel(
+            text="Atom Scale: 1.00x",
+            pos=(-0.85, 0, -0.78),
+            scale=0.05,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0, 0, 0, 0),
+        )
+        self._atom_slider.hide()
+        self._atom_label.hide()
+
+    def _on_atom_scale_changed(self) -> None:
+        """
+        Reads the slider value and applies it to all rendered atom spheres.
+        """
+        if self._atom_slider is None:
+            return
+        scale = float(self._atom_slider["value"])
+        set_atom_scale_factor(scale)
+        if self._atom_label is not None:
+            self._atom_label["text"] = f"Atom Scale: {scale:.2f}x"
 
     def _bg_fade_task(self, task) -> int:
         """
