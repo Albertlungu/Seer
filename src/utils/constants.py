@@ -45,3 +45,31 @@ DEFAULT_RADIUS: float = 1.40e-10  # In metres
 SCENE_SCALE: float = 0.335 / 0.37790948  # Converts one unit in normalized capture to 1m
 
 ANGSTROM_TO_METRES: float = 1e-10
+
+# -------------------------
+# Zoom transition constants
+# -------------------------
+
+LOG_ROOM_DISTANCE: float = 0.6  # log10 of the camera distance in m at room scale (~4m)
+LOG_MOL_DISTANCE: float = (
+    -8.3
+)  # log10 of the camera distance in metres at molecular scale (~5nm)
+SCROLL_STEP_SIZE: float = 0.15
+BASE_MOVEMENT_SPEED: float = 1.5
+ROOM_REFERENCE_DISTANCE: float = (
+    4.0  # Camera distance in m at which BASE_MOVEMENT_SPEED applies
+)
+FADE_FOV_START: float = 10.0
+
+
+# -------------------------
+# Molecular Chunk Streaming
+# -------------------------
+
+CHUNK_SIZE_A: float = 50.0
+LOAD_RADIUS_CHUNKS: int = 2
+UNLOAD_RADIUS_CHUNKS: int = 3
+MOL_CAM_SPEED_A: float = 50.0
+MOL_VIEW_SCALE: float = 0.01
+MAX_CHUNKS_PER_FRAME: int = 3
+CHUNK_MOL_COUNT_PER_TEMPLATE: int = 5

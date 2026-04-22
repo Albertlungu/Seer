@@ -60,6 +60,11 @@ class SimDetails(TypedDict):
     coords: list[CoordsDetails]
 
 
+class Bounds(TypedDict):
+    mins: tuple[float, float, float]
+    maxs: tuple[float, float, float]
+
+
 # ======= PubChem 3D structure =======
 
 
