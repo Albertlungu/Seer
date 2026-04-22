@@ -59,3 +59,4 @@ BASE_MOVEMENT_SPEED: float = 1.5
 ROOM_REFERENCE_DISTANCE: float = (
     4.0  # Camera distance in m at which BASE_MOVEMENT_SPEED applies
 )
+FADE_FOV_START: float = 10.0

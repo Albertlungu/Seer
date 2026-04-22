@@ -6,12 +6,18 @@ python -m src.seer_app
 Main Seer app maker. Amalgamates everything into a single runnable file.
 """
 
-from typing import cast
+from typing import Any, cast
 
+import numpy as np
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import LineSegs, NodePath, Point3
+from panda3d.core import LineSegs, NodePath, Point3, TransparencyAttrib
 
-from src.utils.constants import FINAL_AGGREGATED
+from src.render_molecules.arrange_molecules import load_molecules_for_object
+from src.render_molecules.arrangement.geometry import (
+    calculate_environment_center_of_mass,
+    compute_bounding_sphere_radius,
+)
+from src.utils.constants import FADE_FOV_START, FINAL_AGGREGATED
 from src.utils.json_io import load_json
 from src.utils.type_annotations import Aggregations, Bounds
 from src.video_processing.environment import (
@@ -50,6 +56,20 @@ class SeerApp(ShowBase):
 
         self.room_root = self.render.attachNewNode("room_root")
         self.room_root.show()
+        self.room_root.setTransparency(TransparencyAttrib.MAlpha)
+
+        self.mol_root: NodePath = self.render.attachNewNode("mol_root")
+        self.mol_root.hide()
+
+        bg = self.getBackgroundColor()
+        self._natural_bg: tuple[float, float, float] = (
+            float(bg[0]),
+            float(bg[1]),
+            float(bg[2]),
+        )
+        self._saved_camera_state: dict | None = None
+        self._mol_instance_roots: dict[int, NodePath] = {}
+        self._in_molecular_scene: bool = False
 
         if room_state is None:
             room_state = RoomState(window=self.win, camera=self.camLens)
@@ -88,6 +108,7 @@ class SeerApp(ShowBase):
 
         self.taskMgr.add(self._mouse_look_task, "mouse-look")
         self.taskMgr.add(self._move_task, "move")
+        self.taskMgr.add(self._bg_fade_task, "bg-fade")
         if self.room_state.debug:
             self.taskMgr.add(self._debug_preview_task, "debug-preview")
 
@@ -99,6 +120,100 @@ class SeerApp(ShowBase):
 
         self.accept("wheel_up", self._on_wheel_up)
         self.accept("wheel_down", self._on_wheel_down)
+
+    def _bg_fade_task(self, task) -> int:
+        """
+        Gradients background colour from natural to black as FOV decreases below fade threshold.
+
+        Args:
+            task: Panda3D task object
+
+        Returns:
+            int: Task continuation token
+        """
+        if self._in_molecular_scene:
+            return task.cont
+
+        fov = self.room_state.current_fov
+        fade_end = self.room_state.min_room_fov
+
+        if fov >= FADE_FOV_START:
+            self.setBackgroundColor(*self._natural_bg, 1.0)
+            return task.cont
+
+        t = max(0.0, (fov - fade_end) / (FADE_FOV_START - fade_end))
+        r, g, b = self._natural_bg
+        self.setBackgroundColor(r * t, g * t, b * t, 1.0)
+        return task.cont
+
+    def _enter_molecular_mode(self) -> None:
+        """
+        Hides the room, loads molecules for target, positions camera to face cluster, shows molecule scene.
+        """
+        if self._in_molecular_scene:
+            return
+        self._in_molecular_scene = True
+
+        self._saved_camera_state: dict[str, Any] = {
+            "pos": self.camera.getPos(),
+            "hpr": self.camera.getHpr(),
+            "fov": self.room_state.current_fov,
+        }
+
+        self.room_root.hide()
+        self.setBackgroundColor(0, 0, 0, 1)
+
+        obj_key = self.room_state.target_object_key
+        if obj_key is None:
+            return
+
+        mol_parent = self.mol_root.attachNewNode(f"mol{obj_key}")
+        object_state, self._mol_instance_roots = load_molecules_for_object(
+            object_key=obj_key,
+            data=self.room_data,
+            parent=mol_parent,
+            base=self,
+        )
+
+        tp = self.room_state.target_point
+        if tp is not None:
+            mol_parent.setPos(tp.x, tp.y, tp.z)
+
+        if object_state.instances:
+            positions = [
+                calculate_environment_center_of_mass(
+                    template=object_state.templates[inst.template_id], instance=inst
+                )
+                for inst in object_state.instances.values()
+            ]
+            cluster_center = np.mean(positions, axis=0)
+            max_r = max(
+                compute_bounding_sphere_radius(t)
+                for t in object_state.templates.values()
+            )
+            positions_array = np.array(positions)
+            extent = float(
+                np.linalg.norm(
+                    np.max(positions_array, axis=0) - np.min(positions_array, axis=0)
+                )
+            )
+            cam_dist = max(max_r * 5.0, extent * 1.2)
+
+            cx, cy, cz = (
+                float(cluster_center[0]),
+                float(cluster_center[1]),
+                float(cluster_center[2]),
+            )
+            ox = tp.x if tp is not None else 0.0
+            oy = tp.y if tp is not None else 0.0
+            oz = tp.z if tp is not None else 0.0
+
+            self.camera.setPos(cx + ox, cy - cam_dist + oy, cz + oz)
+            self.camera.setHpr(0, 0, 0)
+
+        self.room_state.camera.setFov(90.0)
+        self.room_state.current_fov = 90.0
+        self.mol_root.show()
 
     def _mouse_look_task(self, task):
         """
