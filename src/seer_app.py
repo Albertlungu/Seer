@@ -154,7 +154,7 @@ class SeerApp(ShowBase):
             return
         self._in_molecular_scene = True
 
-        self._saved_camera_state: dict[str, Any] = {
+        self._saved_camera_state: dict[str, Any] | None = {
             "pos": self.camera.getPos(),
             "hpr": self.camera.getHpr(),
             "fov": self.room_state.current_fov,
@@ -214,6 +214,26 @@ class SeerApp(ShowBase):
         self.room_state.camera.setFov(90.0)
         self.room_state.current_fov = 90.0
         self.mol_root.show()
+
+    def _exit_molecular_mode(self) -> None:
+        if not self._in_molecular_scene:
+            return
+        self._in_molecular_scene = False
+
+        for child in self.mol_root.getChildren():
+            child.detachNode()
+        self._mol_instance_roots = {}
+        self.mol_root.hide()
+
+        self.room_root.show()
+
+        if self._saved_camera_state is not None:
+            self.camera.setPos(self._saved_camera_state["pos"])
+            self.camera.setHpr(self._saved_camera_state["hpr"])
+            fov = self._saved_camera_state["fov"]
+            self.room_state.camera.setFov(fov)
+            self.room_state.current_fov = fov
+            self._saved_camera_state = None
 
     def _mouse_look_task(self, task):
         """
@@ -289,6 +309,7 @@ class SeerApp(ShowBase):
         increase_fov(self.room_state)
         if was_molecular and not self.room_state.molecular_mode:
             self._clear_target_lock()
+            self._exit_molecular_mode()
 
     def _on_wheel_down(self) -> None:
         """
@@ -376,6 +397,8 @@ class SeerApp(ShowBase):
 
         if self.room_state.debug:
             self._draw_debug_lock_box(object_key)
+
+        self._enter_molecular_mode()
 
     def _clear_target_lock(self) -> None:
         """
