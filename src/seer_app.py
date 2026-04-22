@@ -88,7 +88,6 @@ class SeerApp(ShowBase):
         self._loaded_chunks: dict[tuple[int, int, int], NodePath] = {}
         self._mol_templates: dict[int, MoleculeTemplate] | None = None
         self._mol_origin: Point3 | None = None
-        self._room_move_speed: float = self.room_state.current_move_speed
         self._atom_slider: DirectSlider | None = None
         self._atom_label: DirectLabel | None = None
 
@@ -96,6 +95,7 @@ class SeerApp(ShowBase):
             room_state = RoomState(window=self.win, camera=self.camLens)
 
         self.room_state = room_state
+        self._room_move_speed: float = self.room_state.current_move_speed
         self.keys = self.room_state.mvt_key_states
         self.move_speed = self.room_state.current_move_speed
         self.mouse_locked = self.room_state.mouse_locked
@@ -177,6 +177,132 @@ class SeerApp(ShowBase):
         if self._atom_label is not None:
             self._atom_label["text"] = f"Atom Scale: {scale:.2f}x"
 
+    def _chunk_stream_task(self, task) -> int:
+        """
+        Per frame task that loads chunks near the camera and unloads distant ones.
+
+        Args:
+            task: Panda3D task object
+
+        Returns:
+            int: Task continuation token
+        """
+        if not self._in_molecular_scene or self._mol_origin is None:
+            return task.cont
+
+        cam_pos = self.camera.getPos()
+        origin = self._mol_origin
+        mol_cam = np.array(
+            [
+                (cam_pos.x - origin.x) / MOL_VIEW_SCALE,
+                (cam_pos.y - origin.y) / MOL_VIEW_SCALE,
+                (cam_pos.z - origin.z) / MOL_VIEW_SCALE,
+            ]
+        )
+
+        cx = int(np.floor(mol_cam[0] / CHUNK_SIZE_A))
+        cy = int(np.floor(mol_cam[1] / CHUNK_SIZE_A))
+        cz = int(np.floor(mol_cam[2] / CHUNK_SIZE_A))
+
+        r = LOAD_RADIUS_CHUNKS
+        candidates: list[tuple[int, int, int]] = [
+            (ix, iy, iz)
+            for ix in range(cx - r, cx + r + 1)
+            for iy in range(cy - r, cy + r + 1)
+            for iz in range(cz - r, cz + r + 1)
+        ]
+        candidates.sort(
+            key=lambda c: (c[0] - cx) ** 2 + (c[1] - cy) ** 2 + (c[2] - cz) ** 2
+        )
+
+        ur = UNLOAD_RADIUS_CHUNKS
+        for coords in list(self._loaded_chunks):
+            if (
+                abs(coords[0] - cx) > ur
+                or abs(coords[1] - cy) > ur
+                or abs(coords[2] - cz) > ur
+            ):
+                self._loaded_chunks.pop(coords).detachNode()
+
+        generated = 0
+        for coords in candidates:
+            if generated >= MAX_CHUNKS_PER_FRAME:
+                break
+            if coords not in self._loaded_chunks:
+                self._loaded_chunks[coords] = self._generate_chunk(coords)
+                generated += 1
+
+        return task.cont
+
+    def _generate_chunk(self, chunk_coords: tuple[int, int, int]) -> NodePath:
+        """
+        Places and renders molecules for one chunk. Attaches result to mol_root.
+
+        Args:
+            chunk_coords (tuple[int, int, int]): Integer (ix, iy, iz) grid coords
+
+        Returns:
+            NodePath: The chunk node attache to mol_root
+        """
+        ix, iy, iz = chunk_coords
+        seed = abs(hash(chunk_coords) % (2**31))
+        s = CHUNK_SIZE_A
+        cmin = np.array([ix, iy, iz], dtype=float) * s
+        cmax = cmin + s
+
+        box_bottom = np.array(
+            [
+                [cmin[0], cmax[0], cmax[0], cmin[0]],
+                [cmin[1], cmin[1], cmax[1], cmax[1]],
+                [cmin[2], cmin[2], cmin[2], cmin[2]],
+            ],
+            dtype=float,
+        )
+        box_top = np.array(
+            [
+                [cmin[0], cmax[0], cmax[0], cmin[0]],
+                [cmin[1], cmin[1], cmax[1], cmax[1]],
+                [cmax[2], cmax[2], cmax[2], cmax[2]],
+            ],
+            dtype=float,
+        )
+
+        templates = self._mol_templates or {}
+        target_counts = {tid: CHUNK_MOL_COUNT_PER_TEMPLATE for tid in templates}
+        total = sum(target_counts.values())
+
+        object_state = ObjectState(
+            object_key=f"chunk_{ix}_{iy}_{iz}",
+            object_name=f"chunk_{ix}_{iy}_{iz}",
+            instance_id=f"chunk_{ix}_{iy}_{iz}",
+            display_name=f"chunk_{ix}_{iy}_{iz}",
+            templates=templates,
+            instances={},
+            box_bottom=box_bottom,
+            box_top=box_top,
+            rng_seed=seed,
+        )
+
+        if templates:
+            max_r = max(compute_bounding_sphere_radius(t) for t in templates.values())
+            config = PlacementConfig(
+                seed=seed,
+                frontier_radius=max_r * 6.0,
+                min_center_distance=max_r * 3.5,
+                max_total_attempts=total * 100,
+                target_instance_count=total,
+                stop_when_target_met=True,
+                require_in_bounds=False,
+                require_no_overlap=True,
+            )
+            object_state = place_molecules(
+                object_state=object_state, config=config, target_counts=target_counts
+            )
+
+        chunk_np = self.mol_root.attachNewNode(f"chunk_{ix}_{iy}_{iz}")
+        render_object_state(base=self, parent=chunk_np, object_state=object_state)
+        return chunk_np
+
     def _bg_fade_task(self, task) -> int:
         """
         Gradients background colour from natural to black as FOV decreases below fade threshold.
@@ -210,65 +336,39 @@ class SeerApp(ShowBase):
             return
         self._in_molecular_scene = True
 
-        self._saved_camera_state: dict[str, Any] | None = {
+        self._saved_camera_state = {
             "pos": self.camera.getPos(),
             "hpr": self.camera.getHpr(),
             "fov": self.room_state.current_fov,
         }
+        self._room_move_speed = self.move_speed
 
         self.room_root.hide()
         self.setBackgroundColor(0, 0, 0, 1)
 
         obj_key = self.room_state.target_object_key
-        if obj_key is None:
-            return
-
-        mol_parent = self.mol_root.attachNewNode(f"mol{obj_key}")
-        object_state, self._mol_instance_roots = load_molecules_for_object(
-            object_key=obj_key,
-            data=self.room_data,
-            parent=mol_parent,
-            base=self,
-        )
+        if obj_key is not None:
+            self._mol_templates = build_templates_from_object(
+                self.room_data.get(obj_key, {})
+            )
 
         tp = self.room_state.target_point
+        self._mol_origin = tp
+
+        self.mol_root.setScale(MOL_VIEW_SCALE)
         if tp is not None:
-            mol_parent.setPos(tp.x, tp.y, tp.z)
-
-        if object_state.instances:
-            positions = [
-                calculate_environment_center_of_mass(
-                    template=object_state.templates[inst.template_id], instance=inst
-                )
-                for inst in object_state.instances.values()
-            ]
-            cluster_center = np.mean(positions, axis=0)
-            max_r = max(
-                compute_bounding_sphere_radius(t)
-                for t in object_state.templates.values()
-            )
-            positions_array = np.array(positions)
-            extent = float(
-                np.linalg.norm(
-                    np.max(positions_array, axis=0) - np.min(positions_array, axis=0)
-                )
-            )
-            cam_dist = max(max_r * 5.0, extent * 1.2)
-
-            cx, cy, cz = (
-                float(cluster_center[0]),
-                float(cluster_center[1]),
-                float(cluster_center[2]),
-            )
-            ox = tp.x if tp is not None else 0.0
-            oy = tp.y if tp is not None else 0.0
-            oz = tp.z if tp is not None else 0.0
-
-            self.camera.setPos(cx + ox, cy - cam_dist + oy, cz + oz)
-            self.camera.setHpr(0, 0, 0)
-
+            self.mol_root.setPos(tp.x, tp.y, tp.z)
+            self.camera.setPos(tp.x, tp.y, tp.z)
+        self.camera.setHpr(0, 0, 0)
         self.room_state.camera.setFov(90.0)
         self.room_state.current_fov = 90.0
+        self.move_speed = MOL_CAM_SPEED_A * MOL_VIEW_SCALE
+
+        if self._atom_slider is not None:
+            self._atom_slider.show()
+        if self._atom_label is not None:
+            self._atom_label.show()
+
         self.mol_root.show()
 
     def _exit_molecular_mode(self) -> None:
@@ -276,12 +376,23 @@ class SeerApp(ShowBase):
             return
         self._in_molecular_scene = False
 
+        for chunk_np in self._loaded_chunks.values():
+            chunk_np.detachNode()
+        self._loaded_chunks.clear()
+        self._mol_templates = None
+        self._mol_origin = None
+
         for child in self.mol_root.getChildren():
             child.detachNode()
-        self._mol_instance_roots = {}
         self.mol_root.hide()
 
         self.room_root.show()
+        self.move_speed = self._room_move_speed
+
+        if self._atom_slider is not None:
+            self._atom_slider.hide()
+        if self._atom_label is not None:
+            self._atom_label.hide()
 
         if self._saved_camera_state is not None:
             self.camera.setPos(self._saved_camera_state["pos"])
@@ -301,7 +412,11 @@ class SeerApp(ShowBase):
         Returns:
             Any: Task continuation token from `mouse_look`.
         """
-        if self.room_state.molecular_mode and self.room_state.target_locked:
+        if (
+            self.room_state.molecular_mode
+            and self.room_state.target_locked
+            and not self._in_molecular_scene
+        ):
             mouse_watcher = self.mouseWatcherNode
             if (
                 self.win is not None
