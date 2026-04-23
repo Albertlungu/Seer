@@ -91,6 +91,11 @@ class SeerApp(ShowBase):
         self._mol_origin: Point3 | None = None
         self._atom_slider: DirectSlider | None = None
         self._atom_label: DirectLabel | None = None
+        self._sim_threads: dict[tuple[int, int, int], Any] = {}
+        self._chunk_object_states: dict[tuple[int, int, int], ObjectState] = {}
+        self._chunk_instance_roots: dict[tuple[int, int, int], dict[int, NodePath]] = {}
+        self._cloud_rendering: bool = False
+        self._sim_running: bool = False
 
         if room_state is None:
             room_state = RoomState(window=self.win, camera=self.camLens)
@@ -132,7 +137,9 @@ class SeerApp(ShowBase):
         self.taskMgr.add(self._move_task, "move")
         self.taskMgr.add(self._bg_fade_task, "bg-fade")
         self._build_atom_slider()
+        self._build_md_controls()
         self.taskMgr.add(self._chunk_stream_task, "chunk-stream")
+        self.taskMgr.add(self._md_update_task, "md-update")
         if self.room_state.debug:
             self.taskMgr.add(self._debug_preview_task, "debug-preview")
 
@@ -167,6 +174,122 @@ class SeerApp(ShowBase):
         )
         self._atom_slider.hide()
         self._atom_label.hide()
+
+    def _build_md_controls(self) -> None:
+        """
+        Creates the time toggle, temperature slider, and cloud toggle, hidden until molecular mode.
+        """
+        from direct.gui.DirectGui import DirectCheckButton
+
+        self._time_toggle: DirectCheckButton = DirectCheckButton(
+            text="Time",
+            scale=0.05,
+            pos=(1.1, 0, 0.7),
+            command=self._on_time_toggle,
+        )
+        self._time_toggle.hide()
+
+        def _update_temperature() -> None:
+            temp = float(self._temp_slider["value"])
+            self._temp_label["text"] = f"Temp: {temp:.0f} K"
+            for sim in self._sim_threads.values():
+                sim.set_temperature(temp)
+
+        self._temp_slider: DirectSlider = DirectSlider(
+            range=(100, 1000),
+            value=298,
+            pageSize=25,
+            command=_update_temperature,
+            pos=(1.1, 0, 0.55),
+            scale=0.25,
+        )
+        self._temp_slider.hide()
+
+        self._temp_label: DirectLabel = DirectLabel(
+            text="Temp: 298 K",
+            pos=(1.1, 0, 0.6),
+            scale=0.04,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0, 0, 0, 0),
+        )
+        self._temp_label.hide()
+
+        self._cloud_toggle: DirectCheckButton = DirectCheckButton(
+            text="Electron Clouds",
+            scale=0.05,
+            pos=(1.1, 0, 0.4),
+            command=self._on_cloud_toggle,
+        )
+        self._cloud_toggle.hide()
+
+    def _on_time_toggle(self, status: bool) -> None:
+        """Handle the time toggle checkbox."""
+        self._sim_running = status
+        if status:
+            self._start_chunk_simulations()
+        else:
+            for sim in self._sim_threads.values():
+                sim.pause()
+
+    def _on_cloud_toggle(self, status: bool) -> None:
+        """Handle the cloud rendering toggle checkbox."""
+        self._cloud_rendering = status
+
+    def _start_chunk_simulations(self) -> None:
+        """Instantiate or resume a SimulationThread for each loaded chunk."""
+        from src.dynamics.engine import MDEngine
+        from src.dynamics.sim_thread import SimulationThread
+
+        temperature = float(self._temp_slider["value"])
+        for coords, obj_state in list(self._chunk_object_states.items()):
+            if coords in self._sim_threads:
+                self._sim_threads[coords].resume()
+                continue
+            if not obj_state.instances:
+                continue
+            engine = MDEngine(is_metallic=False)
+            engine.load_model()
+            active_ids = list(obj_state.instances.keys())
+            sim = SimulationThread(
+                engine=engine,
+                object_state=obj_state,
+                active_instance_ids=active_ids,
+                temperature=temperature,
+            )
+            sim.start()
+            self._sim_threads[coords] = sim
+
+    def _md_update_task(self, task) -> int:
+        """
+        Read shared position buffers each frame and move atom NodePaths.
+
+        Args:
+            task: Panda3D task object.
+
+        Returns:
+            int: Task continuation token.
+        """
+        if not self._in_molecular_scene or not self._sim_running:
+            return task.cont
+
+        from src.render_molecules.arrangement.renderer import (
+            rebuild_bond_clouds,
+            update_atom_positions,
+        )
+
+        for coords, sim in list(self._sim_threads.items()):
+            if not sim.is_running():
+                continue
+            obj_state = self._chunk_object_states.get(coords)
+            inst_roots = self._chunk_instance_roots.get(coords)
+            if obj_state is None or inst_roots is None:
+                continue
+            positions = sim.buffer.read()
+            update_atom_positions(inst_roots, sim.mapping, positions, obj_state)
+            if self._cloud_rendering:
+                rebuild_bond_clouds(inst_roots, obj_state, self)
+
+        return task.cont
 
     def _on_atom_scale_changed(self) -> None:
         """
@@ -243,6 +366,11 @@ class SeerApp(ShowBase):
                 or abs(coords[2] - cz) > ur
             ):
                 self._loaded_chunks.pop(coords).detachNode()
+                self._chunk_object_states.pop(coords, None)
+                self._chunk_instance_roots.pop(coords, None)
+                sim = self._sim_threads.pop(coords, None)
+                if sim is not None:
+                    sim.stop()
 
         generated = 0
         for coords in candidates:
@@ -326,7 +454,11 @@ class SeerApp(ShowBase):
             )
 
         chunk_np = self.mol_root.attachNewNode(f"chunk_{ix}_{iy}_{iz}")
-        render_object_state(base=self, parent=chunk_np, object_state=object_state)
+        instance_roots = render_object_state(
+            base=self, parent=chunk_np, object_state=object_state
+        )
+        self._chunk_object_states[chunk_coords] = object_state
+        self._chunk_instance_roots[chunk_coords] = instance_roots
         return chunk_np
 
     def _bg_fade_task(self, task) -> int:
@@ -396,6 +528,10 @@ class SeerApp(ShowBase):
             self._atom_label.show()
 
         self.mol_root.show()
+        self._time_toggle.show()
+        self._temp_slider.show()
+        self._temp_label.show()
+        self._cloud_toggle.show()
 
     def _exit_molecular_mode(self) -> None:
         if not self._in_molecular_scene:
@@ -419,6 +555,17 @@ class SeerApp(ShowBase):
             self._atom_slider.hide()
         if self._atom_label is not None:
             self._atom_label.hide()
+
+        self._time_toggle.hide()
+        self._temp_slider.hide()
+        self._temp_label.hide()
+        self._cloud_toggle.hide()
+        for sim in self._sim_threads.values():
+            sim.stop()
+        self._sim_threads.clear()
+        self._chunk_object_states.clear()
+        self._chunk_instance_roots.clear()
+        self._sim_running = False
 
         if self._saved_camera_state is not None:
             self.camera.setPos(self._saved_camera_state["pos"])

@@ -74,3 +74,12 @@ MOL_VIEW_SCALE: float = 0.01
 MAX_CHUNKS_PER_FRAME: int = 2
 CHUNK_MOL_COUNT_PER_TEMPLATE: int = 2
 WORLD_CHUNKS: int = 10  # World loops every WORLD_CHUNKS * CHUNK_SIZE_A Angstroms per axis
+
+# ---------------------------------------------------------------------------
+# Crystal structure element classification
+# ---------------------------------------------------------------------------
+
+METALLIC_ELEMENTS: frozenset[int] = frozenset({
+    13, 20, 22, 24, 25, 26, 27, 28, 29, 30, 47, 79,
+})
+"""Atomic numbers of common metallic elements encountered in household objects."""
