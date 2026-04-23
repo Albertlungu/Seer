@@ -603,16 +603,17 @@ def update_atom_positions(
         if len(atom_nodes) != n_expected:
             continue
 
-        inst_positions = positions[start:end]
+        # Buffer is in metres; NodePaths live in mol_root local space (Angstroms).
+        inst_positions_a = positions[start:end] / 1e-10  # metres -> Angstroms
 
         root_pos = root.getPos(root.getParent())
         rx, ry, rz = float(root_pos.x), float(root_pos.y), float(root_pos.z)
 
-        for node, pos in zip(atom_nodes, inst_positions):
+        for node, pos_a in zip(atom_nodes, inst_positions_a):
             node.setPos(
-                float(pos[0]) - rx,
-                float(pos[1]) - ry,
-                float(pos[2]) - rz,
+                float(pos_a[0]) - rx,
+                float(pos_a[1]) - ry,
+                float(pos_a[2]) - rz,
             )
 
 

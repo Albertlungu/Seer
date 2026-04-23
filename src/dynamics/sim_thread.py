@@ -116,8 +116,8 @@ def flatten_positions(
         inst = object_state.instances[iid]
         tmpl = object_state.templates[inst.template_id]
         world_xyz = apply_instance_transform(template=tmpl, instance=inst)
-        coords = np.column_stack(world_xyz)  # (n_atoms, 3)
-        positions[start:end] = coords
+        coords = np.column_stack(world_xyz)  # (n_atoms, 3) in Angstroms
+        positions[start:end] = coords * 1e-10  # Å -> metres
 
         for local_idx, global_idx in enumerate(range(start, end)):
             element = int(tmpl.elements[local_idx])
