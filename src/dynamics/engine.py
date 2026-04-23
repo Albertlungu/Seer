@@ -66,6 +66,7 @@ def _build_mace_input(
     atomic_numbers: np.ndarray,
     device: str,
     r_max: float,
+    z_list: list[int],
 ) -> dict:
     """
     Build the input dict that MACE models expect.
@@ -75,9 +76,11 @@ def _build_mace_input(
         atomic_numbers: Shape (N,) of ints.
         device: Torch device string.
         r_max: Cutoff radius for neighbor list in Angstroms.
+        z_list: Sorted list of atomic numbers the model was trained on.
+                Used to build one-hot node_attrs of shape (N, n_species).
 
     Returns:
-        Dict with positions, atomic_numbers, edge_index, shifts tensors.
+        Dict suitable for a MACE model forward pass.
     """
     import torch
     from scipy.spatial.distance import cdist
@@ -88,21 +91,31 @@ def _build_mace_input(
     src, dst = np.where(edge_mask)
 
     pos_tensor = torch.tensor(positions, dtype=torch.float64, device=device)
-    z_tensor = torch.tensor(atomic_numbers, dtype=torch.long, device=device)
     edge_index = torch.tensor(
-        np.stack([src, dst], axis=0), dtype=torch.long, device=device
+        np.stack([src, dst], axis=0) if len(src) else np.zeros((2, 0), dtype=np.int64),
+        dtype=torch.long,
+        device=device,
     )
     shifts = torch.zeros((len(src), 3), dtype=torch.float64, device=device)
     batch = torch.zeros(n, dtype=torch.long, device=device)
 
+    # Build one-hot node_attrs: shape (N, n_species)
+    z_to_idx = {z: i for i, z in enumerate(z_list)}
+    n_species = len(z_list)
+    one_hot = np.zeros((n, n_species), dtype=np.float64)
+    for i, z in enumerate(atomic_numbers):
+        idx = z_to_idx.get(int(z))
+        if idx is not None:
+            one_hot[i, idx] = 1.0
+    node_attrs = torch.tensor(one_hot, dtype=torch.float64, device=device)
+
     return {
         "positions": pos_tensor.requires_grad_(True),
-        "node_attrs": z_tensor,
+        "node_attrs": node_attrs,
         "edge_index": edge_index,
         "shifts": shifts,
         "batch": batch,
         "ptr": torch.tensor([0, n], dtype=torch.long, device=device),
-        # Non-periodic system: zero cell, no pbc
         "cell": torch.zeros((1, 3, 3), dtype=torch.float64, device=device),
         "pbc": torch.zeros(3, dtype=torch.bool, device=device),
     }
@@ -127,6 +140,7 @@ class MDEngine:
         self.is_metallic: bool = is_metallic
         self._model: torch.nn.Module | None = None
         self._r_max: float = 5.0
+        self._z_list: list[int] = []
 
     def load_model(self) -> None:
         """Load the appropriate MACE model. Call once before evaluate_forces."""
@@ -152,6 +166,8 @@ class MDEngine:
 
         if hasattr(self._model, "r_max"):
             self._r_max = float(self._model.r_max)
+        if hasattr(self._model, "atomic_numbers"):
+            self._z_list = self._model.atomic_numbers.tolist()
 
     def evaluate_forces(
         self,
@@ -177,7 +193,7 @@ class MDEngine:
         pos_angstrom = positions / ANGSTROM_TO_METRE
 
         inputs = _build_mace_input(
-            pos_angstrom, atomic_numbers, self.device, self._r_max
+            pos_angstrom, atomic_numbers, self.device, self._r_max, self._z_list
         )
 
         import torch
