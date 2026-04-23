@@ -672,5 +672,3 @@ def rebuild_bond_clouds(
                 atom_b=local_coords[idx2],
                 bond_order=int(order),
             )
-
-    return visuals
