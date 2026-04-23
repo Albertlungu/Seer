@@ -102,6 +102,9 @@ def _build_mace_input(
         "shifts": shifts,
         "batch": batch,
         "ptr": torch.tensor([0, n], dtype=torch.long, device=device),
+        # Non-periodic system: zero cell, no pbc
+        "cell": torch.zeros((1, 3, 3), dtype=torch.float64, device=device),
+        "pbc": torch.zeros(3, dtype=torch.bool, device=device),
     }
 
 
