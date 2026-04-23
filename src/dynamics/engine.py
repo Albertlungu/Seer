@@ -8,6 +8,7 @@ Routes organic molecules to MACE-OFF23 and metals to MACE-MP-0.
 from __future__ import annotations
 
 import logging
+import threading
 
 import numpy as np
 
@@ -178,6 +179,8 @@ class MDEngine:
     """
 
     _OFF23_ELEMENTS: frozenset[int] = frozenset({1, 6, 7, 8, 9, 16, 17})
+    # Serializes MPS calls across threads — concurrent MPS gradient tapes OOM quickly
+    _mps_lock: threading.Lock = threading.Lock()
 
     def __init__(self, is_metallic: bool = False) -> None:
         self.device: str = _select_device()
@@ -240,11 +243,19 @@ class MDEngine:
 
         import torch
 
-        with torch.enable_grad():
-            output = self._model(inputs, training=False)
+        lock = MDEngine._mps_lock if self.device == "mps" else None
+        if lock is not None:
+            lock.acquire()
+        try:
+            with torch.enable_grad():
+                output = self._model(inputs, training=False)
 
-        energy_ev = float(output["energy"].detach().cpu().item())
-        forces_ev_a = output["forces"].detach().cpu().double().numpy()
+            energy_ev = float(output["energy"].detach().cpu().item())
+            forces_ev_a = output["forces"].detach().cpu().double().numpy()
+        finally:
+            if lock is not None:
+                lock.release()
+                torch.mps.empty_cache()
 
         forces_n = forces_ev_a * (EV_TO_JOULE / ANGSTROM_TO_METRE)
         energy_j = energy_ev * EV_TO_JOULE

@@ -224,54 +224,94 @@ class SeerApp(ShowBase):
 
     def _on_time_toggle(self, status: bool) -> None:
         """Handle the time toggle checkbox."""
+        from src.render_molecules.arrangement.renderer import (
+            replace_clouds_with_sticks,
+            restore_clouds_from_sticks,
+        )
+
         self._sim_running = status
         if status:
+            # Switch all loaded chunks to cheap stick bonds before simulation starts
+            for coords, inst_roots in self._chunk_instance_roots.items():
+                obj_state = self._chunk_object_states.get(coords)
+                if obj_state:
+                    replace_clouds_with_sticks(inst_roots, obj_state)
             self._start_chunk_simulations()
         else:
             for sim in self._sim_threads.values():
                 sim.pause()
+            # Restore full bond clouds now that dynamics is paused
+            for coords, inst_roots in self._chunk_instance_roots.items():
+                obj_state = self._chunk_object_states.get(coords)
+                if obj_state:
+                    restore_clouds_from_sticks(inst_roots, obj_state, self)
 
     def _on_cloud_toggle(self, status: bool) -> None:
-        """Handle the cloud rendering toggle checkbox."""
+        """Handle the cloud rendering toggle checkbox. Only applies during dynamics."""
         self._cloud_rendering = status
+        if not self._sim_running:
+            return
         for inst_roots in self._chunk_instance_roots.values():
             for root in inst_roots.values():
                 if root is None or root.isEmpty():
                     continue
                 for child in root.getChildren():
-                    if not child.getName().startswith("atom_"):
+                    if child.getName() == "stick_bonds":
                         if status:
-                            child.show()
-                        else:
                             child.hide()
+                        else:
+                            child.show()
+
+    def _get_camera_chunk(self) -> tuple[int, int, int] | None:
+        """Return the chunk coordinate the camera is currently inside."""
+        if self._mol_origin is None or self.camera is None:
+            return None
+        cam_pos = self.camera.getPos()
+        origin = self._mol_origin
+        mol_cam = np.array([
+            (cam_pos.x - origin.x) / MOL_VIEW_SCALE,
+            (cam_pos.y - origin.y) / MOL_VIEW_SCALE,
+            (cam_pos.z - origin.z) / MOL_VIEW_SCALE,
+        ])
+        return (
+            int(np.floor(mol_cam[0] / CHUNK_SIZE_A)),
+            int(np.floor(mol_cam[1] / CHUNK_SIZE_A)),
+            int(np.floor(mol_cam[2] / CHUNK_SIZE_A)),
+        )
 
     def _start_chunk_simulations(self) -> None:
-        """Instantiate or resume a SimulationThread for each loaded chunk."""
+        """Start a SimulationThread for the camera's current chunk only."""
         from src.dynamics.engine import MDEngine
         from src.dynamics.sim_thread import SimulationThread
 
-        temperature = float(self._temp_slider["value"])
+        cam_chunk = self._get_camera_chunk()
+        if cam_chunk is None:
+            return
 
-        # Load the model once and reuse it across all chunk threads.
+        # Stop threads for chunks other than the camera's
+        for coords in list(self._sim_threads):
+            if coords != cam_chunk:
+                self._sim_threads.pop(coords).stop()
+
+        obj_state = self._chunk_object_states.get(cam_chunk)
+        if obj_state is None or not obj_state.instances:
+            return
+
+        if cam_chunk in self._sim_threads:
+            self._sim_threads[cam_chunk].resume()
+            return
+
         engine = MDEngine(is_metallic=False)
         engine.load_model()
-
-        for coords, obj_state in list(self._chunk_object_states.items()):
-            if coords in self._sim_threads:
-                self._sim_threads[coords].resume()
-                continue
-            if not obj_state.instances:
-                continue
-            active_ids = list(obj_state.instances.keys())
-            sim = SimulationThread(
-                engine=engine,
-                object_state=obj_state,
-                active_instance_ids=active_ids,
-                temperature=temperature,
-            )
-            sim.start()
-            sim.resume()  # threads start paused by default
-            self._sim_threads[coords] = sim
+        sim = SimulationThread(
+            engine=engine,
+            object_state=obj_state,
+            active_instance_ids=list(obj_state.instances.keys()),
+            temperature=float(self._temp_slider["value"]),
+        )
+        sim.start()
+        sim.resume()
+        self._sim_threads[cam_chunk] = sim
 
     def _md_update_task(self, task) -> int:
         """

@@ -19,6 +19,7 @@ from panda3d.core import (
     GeomVertexData,
     GeomVertexFormat,
     GeomVertexWriter,
+    LineSegs,
     NodePath,
     TransparencyAttrib,
 )
@@ -656,6 +657,113 @@ def rebuild_bond_clouds(
             [[float(n.getX()), float(n.getY()), float(n.getZ())] for n in atom_nodes]
         )
 
+        aid_to_index = {int(aid): idx for idx, aid in enumerate(template.aids)}
+
+        for aid1, aid2, order in zip(
+            template.bonds_aid1, template.bonds_aid2, template.bond_order
+        ):
+            idx1 = aid_to_index.get(int(aid1))
+            idx2 = aid_to_index.get(int(aid2))
+            if idx1 is None or idx2 is None:
+                continue
+            create_bond_visual(
+                base=base,
+                parent=root,
+                atom_a=local_coords[idx1],
+                atom_b=local_coords[idx2],
+                bond_order=int(order),
+            )
+
+
+def replace_clouds_with_sticks(
+    instance_roots: dict[int, NodePath],
+    object_state: ObjectState,
+) -> None:
+    """
+    Remove bond clouds from all instances and replace with cheap LineSegs sticks.
+    Call when dynamics starts to reduce memory and draw cost.
+
+    Args:
+        instance_roots: Map of instance ID to molecule root NodePath.
+        object_state: Current object state for template/bond lookup.
+    """
+    for instance_id, root in instance_roots.items():
+        if root is None or root.isEmpty():
+            continue
+        inst = object_state.instances.get(instance_id)
+        if inst is None:
+            continue
+        template = object_state.templates[inst.template_id]
+
+        for child in root.getChildren():
+            if not child.getName().startswith("atom_"):
+                child.removeNode()
+
+        if len(template.bonds_aid1) == 0:
+            continue
+
+        atom_nodes = sorted(
+            [ch for ch in root.getChildren() if ch.getName().startswith("atom_")],
+            key=lambda n: int(n.getName().split("_")[1]),
+        )
+        if len(atom_nodes) != len(template.aids):
+            continue
+
+        local_coords = np.array(
+            [[float(n.getX()), float(n.getY()), float(n.getZ())] for n in atom_nodes]
+        )
+        aid_to_index = {int(aid): idx for idx, aid in enumerate(template.aids)}
+
+        lines = LineSegs("stick_bonds")
+        lines.setThickness(3.0)
+        lines.setColor(0.7, 0.7, 0.7, 1.0)
+        for aid1, aid2 in zip(template.bonds_aid1, template.bonds_aid2):
+            idx1 = aid_to_index.get(int(aid1))
+            idx2 = aid_to_index.get(int(aid2))
+            if idx1 is None or idx2 is None:
+                continue
+            lines.moveTo(*local_coords[idx1].tolist())
+            lines.drawTo(*local_coords[idx2].tolist())
+
+        node = lines.create()
+        if node is not None:
+            root.attachNewNode(node).setName("stick_bonds")
+
+
+def restore_clouds_from_sticks(
+    instance_roots: dict[int, NodePath],
+    object_state: ObjectState,
+    base: ShowBase,
+) -> None:
+    """
+    Remove stick bonds and restore full electron-density bond clouds.
+    Call when dynamics stops.
+
+    Args:
+        instance_roots: Map of instance ID to molecule root NodePath.
+        object_state: Current object state for template/bond lookup.
+        base: Panda3D app instance.
+    """
+    for instance_id, root in instance_roots.items():
+        if root is None or root.isEmpty():
+            continue
+        inst = object_state.instances.get(instance_id)
+        if inst is None:
+            continue
+        template = object_state.templates[inst.template_id]
+
+        for child in root.getChildren():
+            if child.getName() == "stick_bonds":
+                child.removeNode()
+
+        atom_nodes = sorted(
+            [ch for ch in root.getChildren() if ch.getName().startswith("atom_")],
+            key=lambda n: int(n.getName().split("_")[1]),
+        )
+        if len(atom_nodes) != len(template.aids):
+            continue
+
+        local_coords = np.column_stack(template.local_xyz)
         aid_to_index = {int(aid): idx for idx, aid in enumerate(template.aids)}
 
         for aid1, aid2, order in zip(
