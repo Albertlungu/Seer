@@ -241,14 +241,17 @@ class SeerApp(ShowBase):
         from src.dynamics.sim_thread import SimulationThread
 
         temperature = float(self._temp_slider["value"])
+
+        # Load the model once and reuse it across all chunk threads.
+        engine = MDEngine(is_metallic=False)
+        engine.load_model()
+
         for coords, obj_state in list(self._chunk_object_states.items()):
             if coords in self._sim_threads:
                 self._sim_threads[coords].resume()
                 continue
             if not obj_state.instances:
                 continue
-            engine = MDEngine(is_metallic=False)
-            engine.load_model()
             active_ids = list(obj_state.instances.keys())
             sim = SimulationThread(
                 engine=engine,
@@ -257,6 +260,7 @@ class SeerApp(ShowBase):
                 temperature=temperature,
             )
             sim.start()
+            sim.resume()  # threads start paused by default
             self._sim_threads[coords] = sim
 
     def _md_update_task(self, task) -> int:
