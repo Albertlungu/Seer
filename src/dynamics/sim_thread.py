@@ -232,25 +232,23 @@ class SimulationThread:
                 continue
 
             try:
-                for _ in range(STEPS_PER_BUFFER_WRITE):
-                    (
-                        self.state.positions,
-                        self.state.velocities,
-                        self.state.forces,
-                    ) = velocity_verlet_step(
-                        positions=self.state.positions,
-                        velocities=self.state.velocities,
-                        forces=self.state.forces,
-                        masses=self.state.masses,
-                        dt=self.state.timestep,
-                        temperature=self.state.temperature,
-                        gamma=LANGEVIN_GAMMA,
-                        engine=self.engine,
-                        atomic_numbers=self.state.atomic_numbers,
-                        rng=self._rng,
-                    )
-                    self.state.step_count += 1
-
+                (
+                    self.state.positions,
+                    self.state.velocities,
+                    self.state.forces,
+                ) = velocity_verlet_step(
+                    positions=self.state.positions,
+                    velocities=self.state.velocities,
+                    forces=self.state.forces,
+                    masses=self.state.masses,
+                    dt=self.state.timestep,
+                    temperature=self.state.temperature,
+                    gamma=LANGEVIN_GAMMA,
+                    engine=self.engine,
+                    atomic_numbers=self.state.atomic_numbers,
+                    rng=self._rng,
+                )
+                self.state.step_count += 1
                 self.buffer.write(self.state.positions)
 
             except Exception as exc:
