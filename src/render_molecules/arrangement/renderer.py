@@ -675,6 +675,72 @@ def rebuild_bond_clouds(
             )
 
 
+def _draw_sticks(
+    root: NodePath,
+    template: MoleculeTemplate,
+    local_coords: np.ndarray,
+    aid_to_index: dict[int, int],
+    thickness: float = 6.0,
+) -> None:
+    """Remove any existing stick_bonds node and draw fresh LineSegs from local_coords."""
+    for child in root.getChildren():
+        if child.getName() == "stick_bonds":
+            child.removeNode()
+
+    if len(template.bonds_aid1) == 0:
+        return
+
+    lines = LineSegs("stick_bonds")
+    lines.setThickness(thickness)
+    lines.setColor(0.75, 0.75, 0.75, 1.0)
+    for aid1, aid2 in zip(template.bonds_aid1, template.bonds_aid2):
+        idx1 = aid_to_index.get(int(aid1))
+        idx2 = aid_to_index.get(int(aid2))
+        if idx1 is None or idx2 is None:
+            continue
+        lines.moveTo(*local_coords[idx1].tolist())
+        lines.drawTo(*local_coords[idx2].tolist())
+
+    node = lines.create()
+    if node is not None:
+        root.attachNewNode(node).setName("stick_bonds")
+
+
+def update_stick_bonds(
+    instance_roots: dict[int, NodePath],
+    object_state: ObjectState,
+) -> None:
+    """
+    Redraw stick bonds at current atom positions each frame during dynamics.
+
+    Args:
+        instance_roots: Map of instance ID to molecule root NodePath.
+        object_state: Current object state for template/bond lookup.
+    """
+    for instance_id, root in instance_roots.items():
+        if root is None or root.isEmpty():
+            continue
+        inst = object_state.instances.get(instance_id)
+        if inst is None:
+            continue
+        template = object_state.templates[inst.template_id]
+
+        atom_nodes = sorted(
+            [ch for ch in root.getChildren() if ch.getName().startswith("atom_")],
+            key=lambda n: int(n.getName().split("_")[1]),
+        )
+        if len(atom_nodes) != len(template.aids):
+            continue
+
+        local_coords = np.array(
+            [[float(n.getX()), float(n.getY()), float(n.getZ())] for n in atom_nodes]
+        )
+        aid_to_index = {
+            int(n.getName().split("_")[1]): i for i, n in enumerate(atom_nodes)
+        }
+        _draw_sticks(root, template, local_coords, aid_to_index)
+
+
 def replace_clouds_with_sticks(
     instance_roots: dict[int, NodePath],
     object_state: ObjectState,
@@ -712,22 +778,12 @@ def replace_clouds_with_sticks(
         local_coords = np.array(
             [[float(n.getX()), float(n.getY()), float(n.getZ())] for n in atom_nodes]
         )
-        aid_to_index = {int(aid): idx for idx, aid in enumerate(template.aids)}
+        # Map AID -> index in the sorted atom_nodes list (not template.aids order)
+        aid_to_index = {
+            int(n.getName().split("_")[1]): i for i, n in enumerate(atom_nodes)
+        }
 
-        lines = LineSegs("stick_bonds")
-        lines.setThickness(3.0)
-        lines.setColor(0.7, 0.7, 0.7, 1.0)
-        for aid1, aid2 in zip(template.bonds_aid1, template.bonds_aid2):
-            idx1 = aid_to_index.get(int(aid1))
-            idx2 = aid_to_index.get(int(aid2))
-            if idx1 is None or idx2 is None:
-                continue
-            lines.moveTo(*local_coords[idx1].tolist())
-            lines.drawTo(*local_coords[idx2].tolist())
-
-        node = lines.create()
-        if node is not None:
-            root.attachNewNode(node).setName("stick_bonds")
+        _draw_sticks(root, template, local_coords, aid_to_index, thickness=6.0)
 
 
 def restore_clouds_from_sticks(

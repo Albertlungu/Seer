@@ -329,6 +329,7 @@ class SeerApp(ShowBase):
         from src.render_molecules.arrangement.renderer import (
             rebuild_bond_clouds,
             update_atom_positions,
+            update_stick_bonds,
         )
 
         for coords, sim in list(self._sim_threads.items()):
@@ -340,6 +341,7 @@ class SeerApp(ShowBase):
                 continue
             positions = sim.buffer.read()
             update_atom_positions(inst_roots, sim.mapping, positions, obj_state)
+            update_stick_bonds(inst_roots, obj_state)
             if self._cloud_rendering:
                 rebuild_bond_clouds(inst_roots, obj_state, self)
 
