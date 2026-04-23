@@ -31,6 +31,7 @@ from src.utils.constants import (
     MOL_CAM_SPEED_A,
     MOL_VIEW_SCALE,
     UNLOAD_RADIUS_CHUNKS,
+    WORLD_CHUNKS,
 )
 from src.utils.json_io import load_json
 from src.utils.type_annotations import Aggregations, Bounds
@@ -201,6 +202,24 @@ class SeerApp(ShowBase):
             ]
         )
 
+        # Wrap camera when it crosses the world boundary (toroidal topology)
+        world_size_a = WORLD_CHUNKS * CHUNK_SIZE_A
+        half_world = world_size_a * 0.5
+        teleport = np.zeros(3)
+        for dim in range(3):
+            if mol_cam[dim] < -half_world:
+                mol_cam[dim] += world_size_a
+                teleport[dim] = world_size_a * MOL_VIEW_SCALE
+            elif mol_cam[dim] >= half_world:
+                mol_cam[dim] -= world_size_a
+                teleport[dim] = -world_size_a * MOL_VIEW_SCALE
+        if np.any(teleport != 0) and self.camera is not None:
+            self.camera.setPos(
+                cam_pos.x + teleport[0],
+                cam_pos.y + teleport[1],
+                cam_pos.z + teleport[2],
+            )
+
         cx = int(np.floor(mol_cam[0] / CHUNK_SIZE_A))
         cy = int(np.floor(mol_cam[1] / CHUNK_SIZE_A))
         cz = int(np.floor(mol_cam[2] / CHUNK_SIZE_A))
@@ -246,7 +265,9 @@ class SeerApp(ShowBase):
             NodePath: The chunk node attache to mol_root
         """
         ix, iy, iz = chunk_coords
-        seed = abs(hash(chunk_coords) % (2**31))
+        wc = WORLD_CHUNKS
+        seed_key = (ix % wc, iy % wc, iz % wc)
+        seed = abs(hash(seed_key)) % (2**31)
         s = CHUNK_SIZE_A
         cmin = np.array([ix, iy, iz], dtype=float) * s
         cmax = cmin + s
@@ -286,14 +307,18 @@ class SeerApp(ShowBase):
 
         if templates:
             max_r = max(compute_bounding_sphere_radius(t) for t in templates.values())
+            # Single-atom templates have radius 0, which would make min_center_distance
+            # 0 and allow all instances to pile at the same point. Floor at 2.0Å so
+            # even bare metal atoms are spaced apart.
+            effective_r = max(max_r, 2.0)
             config = PlacementConfig(
                 seed=seed,
-                frontier_radius=max_r * 6.0,
-                min_center_distance=max_r * 3.5,
+                frontier_radius=CHUNK_SIZE_A * 0.5,
+                min_center_distance=effective_r * 3.5,
                 max_total_attempts=total * 100,
                 target_instance_count=total,
                 stop_when_target_met=True,
-                require_in_bounds=False,
+                require_in_bounds=True,
                 require_no_overlap=True,
             )
             object_state = place_molecules(
