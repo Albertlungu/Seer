@@ -234,6 +234,16 @@ class SeerApp(ShowBase):
     def _on_cloud_toggle(self, status: bool) -> None:
         """Handle the cloud rendering toggle checkbox."""
         self._cloud_rendering = status
+        for inst_roots in self._chunk_instance_roots.values():
+            for root in inst_roots.values():
+                if root is None or root.isEmpty():
+                    continue
+                for child in root.getChildren():
+                    if not child.getName().startswith("atom_"):
+                        if status:
+                            child.show()
+                        else:
+                            child.hide()
 
     def _start_chunk_simulations(self) -> None:
         """Instantiate or resume a SimulationThread for each loaded chunk."""

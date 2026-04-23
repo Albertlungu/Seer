@@ -10,7 +10,7 @@ import numpy as np
 # Physical constants (SI)
 # ---------------------------------------------------------------------------
 
-MD_TIMESTEP: float = 5e-16
+MD_TIMESTEP: float = 5e-14
 """Integration timestep in seconds. 0.5 femtoseconds."""
 
 BOLTZMANN_CONSTANT: float = 1.380649e-23
