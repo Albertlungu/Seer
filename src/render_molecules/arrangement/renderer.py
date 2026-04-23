@@ -97,6 +97,7 @@ def create_atom_sphere(
     if base.loader is None:
         raise RuntimeError("ShowBase loader not initialized")
     sphere = cast(NodePath, base.loader.loadModel("models/misc/sphere"))
+    sphere.setName(f"atom_{aid}")
 
     sphere.reparentTo(parent)
     x, y, z = np.column_stack(template.local_xyz)[atom_idx]
@@ -570,5 +571,105 @@ def create_bond_visual(
         visuals.extend(create_pi_bond_cloud(base, parent, atom_a, atom_b, u))
     if pi_count >= 2:
         visuals.extend(create_pi_bond_cloud(base, parent, atom_a, atom_b, v))
+
+
+def update_atom_positions(
+    instance_roots: dict[int, NodePath],
+    atom_mapping: "AtomMapping",
+    positions: np.ndarray,
+    object_state: ObjectState,
+) -> None:
+    """
+    Move existing atom sphere NodePaths to new positions from the simulation buffer.
+    Does not recreate the scene graph.
+
+    Args:
+        instance_roots: Map of instance ID to molecule root NodePath.
+        atom_mapping: AtomMapping from the simulation thread.
+        positions: Flat (N, 3) array of current atom positions in world space.
+        object_state: Current object state for template lookup.
+    """
+    for instance_id, (start, end) in atom_mapping.instance_to_sim_range.items():
+        root = instance_roots.get(instance_id)
+        if root is None or root.isEmpty():
+            continue
+
+        atom_nodes = sorted(
+            [ch for ch in root.getChildren() if ch.getName().startswith("atom_")],
+            key=lambda n: int(n.getName().split("_")[1]),
+        )
+
+        n_expected = end - start
+        if len(atom_nodes) != n_expected:
+            continue
+
+        inst_positions = positions[start:end]
+
+        root_pos = root.getPos(root.getParent())
+        rx, ry, rz = float(root_pos.x), float(root_pos.y), float(root_pos.z)
+
+        for node, pos in zip(atom_nodes, inst_positions):
+            node.setPos(
+                float(pos[0]) - rx,
+                float(pos[1]) - ry,
+                float(pos[2]) - rz,
+            )
+
+
+def rebuild_bond_clouds(
+    instance_roots: dict[int, NodePath],
+    object_state: ObjectState,
+    base: ShowBase,
+) -> None:
+    """
+    Remove existing bond clouds and recreate them at current atom positions.
+    Only call when cloud rendering is enabled during dynamics.
+
+    Args:
+        instance_roots: Map of instance ID to molecule root NodePath.
+        object_state: Current object state for template/bond lookup.
+        base: Panda3D app instance.
+    """
+    for instance_id, root in instance_roots.items():
+        if root is None or root.isEmpty():
+            continue
+
+        inst = object_state.instances.get(instance_id)
+        if inst is None:
+            continue
+        template = object_state.templates[inst.template_id]
+
+        for child in root.getChildren():
+            if not child.getName().startswith("atom_"):
+                child.removeNode()
+
+        atom_nodes = sorted(
+            [ch for ch in root.getChildren() if ch.getName().startswith("atom_")],
+            key=lambda n: int(n.getName().split("_")[1]),
+        )
+
+        if len(atom_nodes) != len(template.aids):
+            continue
+
+        local_coords = np.array(
+            [[float(n.getX()), float(n.getY()), float(n.getZ())] for n in atom_nodes]
+        )
+
+        aid_to_index = {int(aid): idx for idx, aid in enumerate(template.aids)}
+
+        for aid1, aid2, order in zip(
+            template.bonds_aid1, template.bonds_aid2, template.bond_order
+        ):
+            idx1 = aid_to_index.get(int(aid1))
+            idx2 = aid_to_index.get(int(aid2))
+            if idx1 is None or idx2 is None:
+                continue
+            create_bond_visual(
+                base=base,
+                parent=root,
+                atom_a=local_coords[idx1],
+                atom_b=local_coords[idx2],
+                bond_order=int(order),
+            )
 
     return visuals
