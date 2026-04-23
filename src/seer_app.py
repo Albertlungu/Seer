@@ -150,14 +150,15 @@ class SeerApp(ShowBase):
         """
         self._atom_slider = DirectSlider(
             range=(0.1, 1.0),
-            value=1.0,
+            value=0.33,
             pageSize=0.1,
             command=self._on_atom_scale_changed,
             pos=(-0.85, 0, -0.85),
             scale=0.35,
         )
+        set_atom_scale_factor(0.33)
         self._atom_label = DirectLabel(
-            text="Atom Scale: 1.00x",
+            text="Atom Scale: 0.33x",
             pos=(-0.85, 0, -0.78),
             scale=0.05,
             text_fg=(1, 1, 1, 1),
