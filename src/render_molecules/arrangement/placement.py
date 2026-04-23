@@ -269,8 +269,9 @@ def place_seed_instance(
             f"Found {len(template_id)} appearances for {template.name}, expected 1 (whoopsies!)"
         )
     template_id = template_id[0]
-    # Place seed at origin instead of bbox center
-    seed_position = np.array([0.0, 0.0, 0.0])
+    seed_position = compute_bbox_center(
+        object_state.box_bottom, object_state.box_top
+    )
     rotation_matrix, hpr = sample_random_rotation(rng=rng)
     instance_id = 0
     return create_instance(
@@ -504,9 +505,12 @@ def place_molecules(
         next_template_id = schedule_next_molecule(
             target_counts=target_counts, placed_counts=placed_counts, rng=rng
         )
-        next_anchor_instance_id = select_next_anchor(
-            active_frontier=active_frontier, config=config, rng=rng
-        )
+        try:
+            next_anchor_instance_id = select_next_anchor(
+                active_frontier=active_frontier, config=config, rng=rng
+            )
+        except ValueError:
+            break  # Frontier exhausted; return whatever was placed
 
         # Sample a candidate position and rotation near the chosen anchor's world COM.
         # instance.position is the rigid-body translation vector, not the COM, so we
