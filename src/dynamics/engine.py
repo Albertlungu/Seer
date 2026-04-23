@@ -5,10 +5,11 @@ MACE model loading and force evaluation.
 Routes organic molecules to MACE-OFF23 and metals to MACE-MP-0.
 """
 
+from __future__ import annotations
+
 import logging
 
 import numpy as np
-import torch
 
 from src.dynamics.constants import ANGSTROM_TO_METRE, EV_TO_JOULE
 
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 def _select_device() -> str:
     """Pick the best available torch device."""
+    import torch
+
     if torch.backends.mps.is_available():
         return "mps"
     if torch.cuda.is_available():
@@ -76,6 +79,7 @@ def _build_mace_input(
     Returns:
         Dict with positions, atomic_numbers, edge_index, shifts tensors.
     """
+    import torch
     from scipy.spatial.distance import cdist
 
     n = len(positions)
@@ -172,6 +176,8 @@ class MDEngine:
         inputs = _build_mace_input(
             pos_angstrom, atomic_numbers, self.device, self._r_max
         )
+
+        import torch
 
         with torch.enable_grad():
             output = self._model(inputs, training=False)
