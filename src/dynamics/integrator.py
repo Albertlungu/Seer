@@ -34,7 +34,7 @@ def assign_boltzmann_velocities(
         Velocities of shape (N, 3) in m/s with zero total momentum.
     """
     if temperature <= 0:
-        return np.zeros((len(masses), 3), dtype=np.float64)
+        return np.zeros((len(masses), 3), dtype=np.float32)
 
     sigma = np.sqrt(BOLTZMANN_CONSTANT * temperature / masses)[:, None]
     v = rng.standard_normal((len(masses), 3)) * sigma

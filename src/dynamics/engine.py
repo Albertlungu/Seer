@@ -27,6 +27,45 @@ def _select_device() -> str:
     return "cpu"
 
 
+def _patch_double_for_mps() -> None:
+    """
+    Monkey-patch torch.Tensor.double to return float() on MPS tensors.
+
+    MACE's forward pass calls .double() in two places for numerical precision.
+    MPS only supports float32, so those calls raise TypeError. This patch
+    makes .double() a no-op (stays float32) for MPS tensors only.
+    Accuracy is slightly reduced but acceptable for visualization.
+    """
+    import torch
+
+    if getattr(torch.Tensor, "_mps_double_patched", False):
+        return
+    _orig = torch.Tensor.double
+
+    def _mps_safe_double(self):
+        if self.device.type == "mps":
+            return self.float()
+        return _orig(self)
+
+    torch.Tensor.double = _mps_safe_double  # type: ignore[method-assign]
+    torch.Tensor._mps_double_patched = True  # type: ignore[attr-defined]
+
+
+def _load_and_cast(model_fn, device: str):
+    """Load a MACE model, casting to float32 and moving to MPS if needed."""
+    import torch
+
+    if device == "mps":
+        _patch_double_for_mps()
+        load_device = "cpu"
+        model = model_fn(load_device)
+        model = model.float().to(device)
+    else:
+        model = model_fn(device)
+    model.eval()
+    return model
+
+
 def load_mace_off23(device: str) -> torch.nn.Module:
     """
     Load the MACE-OFF23 model for organic molecules.
@@ -39,9 +78,10 @@ def load_mace_off23(device: str) -> torch.nn.Module:
     """
     from mace.calculators import mace_off
 
-    model = mace_off(model="medium", device=device, return_raw_model=True)
-    model.eval()
-    return model
+    return _load_and_cast(
+        lambda d: mace_off(model="medium", device=d, return_raw_model=True),
+        device,
+    )
 
 
 def load_mace_mp0(device: str) -> torch.nn.Module:
@@ -56,9 +96,10 @@ def load_mace_mp0(device: str) -> torch.nn.Module:
     """
     from mace.calculators import mace_mp
 
-    model = mace_mp(model="medium", device=device, return_raw_model=True)
-    model.eval()
-    return model
+    return _load_and_cast(
+        lambda d: mace_mp(model="medium", device=d, return_raw_model=True),
+        device,
+    )
 
 
 def _build_mace_input(
@@ -85,29 +126,32 @@ def _build_mace_input(
     import torch
     from scipy.spatial.distance import cdist
 
+    # MPS only supports float32; use float64 everywhere else for numerical accuracy.
+    fdtype = torch.float32 if device == "mps" else torch.float32
+
     n = len(positions)
     dists = cdist(positions, positions)
     edge_mask = (dists < r_max) & (dists > 1e-8)
     src, dst = np.where(edge_mask)
 
-    pos_tensor = torch.tensor(positions, dtype=torch.float64, device=device)
+    pos_tensor = torch.tensor(positions, dtype=fdtype, device=device)
     edge_index = torch.tensor(
         np.stack([src, dst], axis=0) if len(src) else np.zeros((2, 0), dtype=np.int64),
         dtype=torch.long,
         device=device,
     )
-    shifts = torch.zeros((len(src), 3), dtype=torch.float64, device=device)
+    shifts = torch.zeros((len(src), 3), dtype=fdtype, device=device)
     batch = torch.zeros(n, dtype=torch.long, device=device)
 
     # Build one-hot node_attrs: shape (N, n_species)
     z_to_idx = {z: i for i, z in enumerate(z_list)}
     n_species = len(z_list)
-    one_hot = np.zeros((n, n_species), dtype=np.float64)
+    one_hot = np.zeros((n, n_species), dtype=np.float32)
     for i, z in enumerate(atomic_numbers):
         idx = z_to_idx.get(int(z))
         if idx is not None:
             one_hot[i, idx] = 1.0
-    node_attrs = torch.tensor(one_hot, dtype=torch.float64, device=device)
+    node_attrs = torch.tensor(one_hot, dtype=fdtype, device=device)
 
     return {
         "positions": pos_tensor.requires_grad_(True),
@@ -116,7 +160,7 @@ def _build_mace_input(
         "shifts": shifts,
         "batch": batch,
         "ptr": torch.tensor([0, n], dtype=torch.long, device=device),
-        "cell": torch.zeros((1, 3, 3), dtype=torch.float64, device=device),
+        "cell": torch.zeros((1, 3, 3), dtype=fdtype, device=device),
         "pbc": torch.zeros(3, dtype=torch.bool, device=device),
     }
 
@@ -153,9 +197,7 @@ class MDEngine:
                 logger.info("Loaded MACE-OFF23 on %s", self.device)
         except Exception:
             if self.device != "cpu":
-                logger.warning(
-                    "Failed to load on %s, falling back to CPU", self.device
-                )
+                logger.warning("Failed to load on %s, falling back to CPU", self.device)
                 self.device = "cpu"
                 if self.is_metallic:
                     self._model = load_mace_mp0("cpu")
@@ -202,7 +244,7 @@ class MDEngine:
             output = self._model(inputs, training=False)
 
         energy_ev = float(output["energy"].detach().cpu().item())
-        forces_ev_a = output["forces"].detach().cpu().numpy()
+        forces_ev_a = output["forces"].detach().cpu().double().numpy()
 
         forces_n = forces_ev_a * (EV_TO_JOULE / ANGSTROM_TO_METRE)
         energy_j = energy_ev * EV_TO_JOULE

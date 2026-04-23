@@ -37,7 +37,7 @@ def get_crystal_structure(atomic_number: int) -> CrystalStructure:
         return CrystalStructure(
             structure_type=stype,
             lattice_parameter=a,
-            basis_positions=np.array(basis, dtype=np.float64),
+            basis_positions=np.array(basis, dtype=np.float32),
         )
 
     radius = ELEMENT_RADII.get(atomic_number, 1.5e-10)
@@ -50,7 +50,7 @@ def get_crystal_structure(atomic_number: int) -> CrystalStructure:
         lattice_parameter=a_est,
         basis_positions=np.array(
             [[0, 0, 0], [0.5, 0.5, 0], [0.5, 0, 0.5], [0, 0.5, 0.5]],
-            dtype=np.float64,
+            dtype=np.float32,
         ),
     )
 
