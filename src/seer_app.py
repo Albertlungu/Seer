@@ -280,38 +280,36 @@ class SeerApp(ShowBase):
         )
 
     def _start_chunk_simulations(self) -> None:
-        """Start a SimulationThread for the camera's current chunk only."""
+        """Start a SimulationThread for all loaded chunks."""
         from src.dynamics.engine import MDEngine
         from src.dynamics.sim_thread import SimulationThread
 
-        cam_chunk = self._get_camera_chunk()
-        if cam_chunk is None:
-            return
-
-        # Stop threads for chunks other than the camera's
+        # Stop threads for chunks that are no longer loaded
         for coords in list(self._sim_threads):
-            if coords != cam_chunk:
+            if coords not in self._chunk_object_states:
                 self._sim_threads.pop(coords).stop()
 
-        obj_state = self._chunk_object_states.get(cam_chunk)
-        if obj_state is None or not obj_state.instances:
-            return
-
-        if cam_chunk in self._sim_threads:
-            self._sim_threads[cam_chunk].resume()
-            return
-
+        # Load model once, share across all chunk threads
         engine = MDEngine(is_metallic=False)
         engine.load_model()
-        sim = SimulationThread(
-            engine=engine,
-            object_state=obj_state,
-            active_instance_ids=list(obj_state.instances.keys()),
-            temperature=float(self._temp_slider["value"]),
-        )
-        sim.start()
-        sim.resume()
-        self._sim_threads[cam_chunk] = sim
+        temperature = float(self._temp_slider["value"])
+
+        # Start/resume simulations for all loaded chunks
+        for coords, obj_state in self._chunk_object_states.items():
+            if obj_state is None or not obj_state.instances:
+                continue
+            if coords in self._sim_threads:
+                self._sim_threads[coords].resume()
+                continue
+            sim = SimulationThread(
+                engine=engine,
+                object_state=obj_state,
+                active_instance_ids=list(obj_state.instances.keys()),
+                temperature=temperature,
+            )
+            sim.start()
+            sim.resume()
+            self._sim_threads[coords] = sim
 
     def _md_update_task(self, task) -> int:
         """

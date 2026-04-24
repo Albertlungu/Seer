@@ -610,6 +610,11 @@ def update_atom_positions(
         root_pos = root.getPos(root.getParent())
         rx, ry, rz = float(root_pos.x), float(root_pos.y), float(root_pos.z)
 
+        # Skip if simulation has blown up (NaN, inf, or atoms >50Å from root)
+        local = inst_positions_a - np.array([[rx, ry, rz]])
+        if not np.all(np.isfinite(local)) or np.max(np.abs(local)) > 50.0:
+            continue
+
         for node, pos_a in zip(atom_nodes, inst_positions_a):
             node.setPos(
                 float(pos_a[0]) - rx,
@@ -688,6 +693,10 @@ def _draw_sticks(
             child.removeNode()
 
     if len(template.bonds_aid1) == 0:
+        return
+
+    # Skip if any atom position is unreasonable (blown-up simulation)
+    if not np.all(np.isfinite(local_coords)) or np.max(np.abs(local_coords)) > 50.0:
         return
 
     lines = LineSegs("stick_bonds")
@@ -819,8 +828,13 @@ def restore_clouds_from_sticks(
         if len(atom_nodes) != len(template.aids):
             continue
 
-        local_coords = np.column_stack(template.local_xyz)
-        aid_to_index = {int(aid): idx for idx, aid in enumerate(template.aids)}
+        local_coords = np.array(
+            [[float(n.getX()), float(n.getY()), float(n.getZ())] for n in atom_nodes]
+        )
+        # Map AID -> index in sorted atom_nodes (same fix as _draw_sticks)
+        aid_to_index = {
+            int(n.getName().split("_")[1]): i for i, n in enumerate(atom_nodes)
+        }
 
         for aid1, aid2, order in zip(
             template.bonds_aid1, template.bonds_aid2, template.bond_order

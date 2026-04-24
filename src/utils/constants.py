@@ -67,8 +67,8 @@ FADE_FOV_START: float = 10.0
 # -------------------------
 
 CHUNK_SIZE_A: float = 100.0
-LOAD_RADIUS_CHUNKS: int = 2
-UNLOAD_RADIUS_CHUNKS: int = 3
+LOAD_RADIUS_CHUNKS: int = 1
+UNLOAD_RADIUS_CHUNKS: int = 2
 MOL_CAM_SPEED_A: float = 50.0
 MOL_VIEW_SCALE: float = 0.01
 MAX_CHUNKS_PER_FRAME: int = 2
