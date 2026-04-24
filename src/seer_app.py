@@ -96,6 +96,8 @@ class SeerApp(ShowBase):
         self._chunk_instance_roots: dict[tuple[int, int, int], dict[int, NodePath]] = {}
         self._cloud_rendering: bool = False
         self._sim_running: bool = False
+        # Per-chunk interpolation state for smooth animation between MACE steps
+        self._chunk_interp: dict[tuple[int, int, int], dict] = {}
 
         if room_state is None:
             room_state = RoomState(window=self.win, camera=self.camLens)
@@ -240,6 +242,7 @@ class SeerApp(ShowBase):
         else:
             for sim in self._sim_threads.values():
                 sim.pause()
+            self._chunk_interp.clear()
             # Restore full bond clouds now that dynamics is paused
             for coords, inst_roots in self._chunk_instance_roots.items():
                 obj_state = self._chunk_object_states.get(coords)
@@ -314,6 +317,8 @@ class SeerApp(ShowBase):
     def _md_update_task(self, task) -> int:
         """
         Read shared position buffers each frame and move atom NodePaths.
+        Interpolates between the previous and current simulation step so that
+        atoms move smoothly rather than snapping every MACE inference cycle.
 
         Args:
             task: Panda3D task object.
@@ -324,11 +329,15 @@ class SeerApp(ShowBase):
         if not self._in_molecular_scene or not self._sim_running:
             return task.cont
 
+        import time as _time
+
         from src.render_molecules.arrangement.renderer import (
             rebuild_bond_clouds,
             update_atom_positions,
             update_stick_bonds,
         )
+
+        now = _time.monotonic()
 
         for coords, sim in list(self._sim_threads.items()):
             if not sim.is_running():
@@ -337,7 +346,36 @@ class SeerApp(ShowBase):
             inst_roots = self._chunk_instance_roots.get(coords)
             if obj_state is None or inst_roots is None:
                 continue
-            positions = sim.buffer.read()
+
+            new_buf = sim.buffer.read()
+
+            # Initialise interpolation state on first encounter
+            if coords not in self._chunk_interp:
+                self._chunk_interp[coords] = {
+                    "prev": new_buf.copy(),
+                    "curr": new_buf.copy(),
+                    "last_step_time": now,
+                    "step_duration": 0.5,  # initial guess; adapts via EMA
+                }
+
+            state = self._chunk_interp[coords]
+
+            # Detect when the background thread has written a new frame
+            if not np.array_equal(new_buf, state["curr"]):
+                elapsed = now - state["last_step_time"]
+                # Exponential moving average keeps step_duration estimate stable
+                state["step_duration"] = elapsed * 0.4 + state["step_duration"] * 0.6
+                state["prev"] = state["curr"]
+                state["curr"] = new_buf.copy()
+                state["last_step_time"] = now
+
+            # t in [0, 1]: how far through the current step we are
+            t = min(
+                (now - state["last_step_time"]) / max(state["step_duration"], 1e-4),
+                1.0,
+            )
+            positions = state["prev"] * (1.0 - t) + state["curr"] * t
+
             update_atom_positions(inst_roots, sim.mapping, positions, obj_state)
             update_stick_bonds(inst_roots, obj_state)
             if self._cloud_rendering:
@@ -619,6 +657,7 @@ class SeerApp(ShowBase):
         self._sim_threads.clear()
         self._chunk_object_states.clear()
         self._chunk_instance_roots.clear()
+        self._chunk_interp.clear()
         self._sim_running = False
 
         if self._saved_camera_state is not None:
