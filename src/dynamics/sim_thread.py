@@ -224,6 +224,10 @@ class SimulationThread:
         """Update the thermostat target. Takes effect on the next step."""
         self.state.temperature = max(0.0, temperature)
 
+    def set_timestep(self, dt: float) -> None:
+        """Update the integration timestep. Takes effect on the next step."""
+        self.state.timestep = max(1e-16, dt)
+
     def _run(self) -> None:
         """Main loop executed on the background thread."""
         while not self._stop_event.is_set():

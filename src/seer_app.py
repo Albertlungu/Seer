@@ -224,6 +224,33 @@ class SeerApp(ShowBase):
         )
         self._cloud_toggle.hide()
 
+        def _update_speed() -> None:
+            multiplier = float(self._speed_slider["value"])
+            self._speed_label["text"] = f"Speed: {multiplier:.1f}x"
+            from src.dynamics.constants import MD_TIMESTEP
+            dt = MD_TIMESTEP * multiplier
+            for sim in self._sim_threads.values():
+                sim.set_timestep(dt)
+
+        self._speed_slider: DirectSlider = DirectSlider(
+            range=(1.0, 50.0),
+            value=10.0,
+            pageSize=1.0,
+            command=_update_speed,
+            pos=(1.1, 0, 0.2),
+            scale=0.25,
+        )
+        self._speed_slider.hide()
+
+        self._speed_label: DirectLabel = DirectLabel(
+            text="Speed: 10.0x",
+            pos=(1.1, 0, 0.25),
+            scale=0.04,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0, 0, 0, 0),
+        )
+        self._speed_label.hide()
+
     def _on_time_toggle(self, status: bool) -> None:
         """Handle the time toggle checkbox."""
         from src.render_molecules.arrangement.renderer import (
@@ -296,6 +323,8 @@ class SeerApp(ShowBase):
         engine = MDEngine(is_metallic=False)
         engine.load_model()
         temperature = float(self._temp_slider["value"])
+        from src.dynamics.constants import MD_TIMESTEP
+        dt = MD_TIMESTEP * float(self._speed_slider["value"])
 
         # Start/resume simulations for all loaded chunks
         for coords, obj_state in self._chunk_object_states.items():
@@ -310,6 +339,7 @@ class SeerApp(ShowBase):
                 active_instance_ids=list(obj_state.instances.keys()),
                 temperature=temperature,
             )
+            sim.set_timestep(dt)
             sim.start()
             sim.resume()
             self._sim_threads[coords] = sim
@@ -624,6 +654,8 @@ class SeerApp(ShowBase):
         self._temp_slider.show()
         self._temp_label.show()
         self._cloud_toggle.show()
+        self._speed_slider.show()
+        self._speed_label.show()
 
     def _exit_molecular_mode(self) -> None:
         if not self._in_molecular_scene:
@@ -652,6 +684,8 @@ class SeerApp(ShowBase):
         self._temp_slider.hide()
         self._temp_label.hide()
         self._cloud_toggle.hide()
+        self._speed_slider.hide()
+        self._speed_label.hide()
         for sim in self._sim_threads.values():
             sim.stop()
         self._sim_threads.clear()
