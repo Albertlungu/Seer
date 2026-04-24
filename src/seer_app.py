@@ -234,7 +234,7 @@ class SeerApp(ShowBase):
 
         self._speed_slider: DirectSlider = DirectSlider(
             range=(1.0, 50.0),
-            value=10.0,
+            value=2.0,
             pageSize=1.0,
             command=_update_speed,
             pos=(1.1, 0, 0.2),
@@ -243,7 +243,7 @@ class SeerApp(ShowBase):
         self._speed_slider.hide()
 
         self._speed_label: DirectLabel = DirectLabel(
-            text="Speed: 10.0x",
+            text="Speed: 2.0x",
             pos=(1.1, 0, 0.25),
             scale=0.04,
             text_fg=(1, 1, 1, 1),
@@ -393,11 +393,17 @@ class SeerApp(ShowBase):
             # Detect when the background thread has written a new frame
             if not np.array_equal(new_buf, state["curr"]):
                 elapsed = now - state["last_step_time"]
-                # Exponential moving average keeps step_duration estimate stable
                 state["step_duration"] = elapsed * 0.4 + state["step_duration"] * 0.6
-                state["prev"] = state["curr"]
-                state["curr"] = new_buf.copy()
                 state["last_step_time"] = now
+
+                # Reject the new frame if any atom moved more than 2Å in one step.
+                # Blow-up starts gradually — catching it here prevents interpolation
+                # from slowly drifting atoms toward an exploded configuration.
+                max_step_a = np.max(np.abs(new_buf - state["curr"])) / 1e-10
+                if max_step_a <= 2.0 and np.all(np.isfinite(new_buf)):
+                    state["prev"] = state["curr"]
+                    state["curr"] = new_buf.copy()
+                # If blow-up detected: silently hold curr; atoms freeze visually.
 
             # t in [0, 1]: how far through the current step we are
             t = min(
