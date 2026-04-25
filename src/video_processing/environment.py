@@ -26,10 +26,11 @@ from panda3d.core import (
 )
 
 from src.utils.constants import FINAL_AGGREGATED
+from src.utils.resource_path import resource_path
 
 loadPrcFileData("", "load-file-type p3assimp")
 
-AGGREGATION_PATH = f"./data/vision_json/{FINAL_AGGREGATED}"
+AGGREGATION_PATH = resource_path(f"data/vision_json/{FINAL_AGGREGATED}")
 
 
 @dataclass
@@ -183,8 +184,8 @@ def env_setup(loader: Loader, parent: NodePath, room_state: RoomState) -> NodePa
     """
 
     env: NodePath = loader.loadModel(
-        "/Users/albertlungu/Local/GitHub/Seer/data/reconstructions/obj/albert_room.obj"
-    )  # If there are issues, revert to absolute path
+        resource_path("data/reconstructions/obj/albert_room.obj")
+    )
     env.reparentTo(parent)
     env.setHpr(room_state.default_hpr)
     env.setTwoSided(True)

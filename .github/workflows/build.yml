@@ -1,0 +1,91 @@
+name: Build Seer
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact_name: Seer-macOS.dmg
+          - os: windows-latest
+            artifact_name: Seer-Windows.zip
+          - os: ubuntu-latest
+            artifact_name: Seer-Linux.tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install production dependencies
+        run: pip install -r requirements-prod.txt pyinstaller pyinstaller-hooks-contrib
+
+      - name: Build with PyInstaller
+        run: pyinstaller seer.spec
+
+      # ── macOS: wrap dist/Seer.app into a .dmg ──────────────────────────
+      - name: Create DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install create-dmg
+          create-dmg \
+            --volname "Seer" \
+            --volicon "dist/Seer.app/Contents/Resources/app.icns" \
+            --window-size 600 400 \
+            --icon-size 128 \
+            --icon "Seer.app" 150 200 \
+            --app-drop-link 450 200 \
+            "${{ matrix.artifact_name }}" \
+            "dist/Seer.app" || \
+          hdiutil create -volname Seer -srcfolder dist/Seer.app \
+            -ov -format UDZO "${{ matrix.artifact_name }}"
+
+      # ── Windows: zip dist/Seer/ ─────────────────────────────────────────
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist\Seer -DestinationPath "${{ matrix.artifact_name }}"
+
+      # ── Linux: tar dist/Seer/ ───────────────────────────────────────────
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: tar -czf "${{ matrix.artifact_name }}" -C dist Seer
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+
+  # Create a GitHub release and attach all three artifacts when a tag is pushed
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create release
+        uses: gh-action-gh-release@latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+            Seer-macOS.dmg/Seer-macOS.dmg
+            Seer-Windows.zip/Seer-Windows.zip
+            Seer-Linux.tar.gz/Seer-Linux.tar.gz
