@@ -720,7 +720,12 @@ def update_stick_bonds(
     object_state: ObjectState,
 ) -> None:
     """
-    Redraw stick bonds at current atom positions each frame during dynamics.
+    Update stick bond endpoints to match current atom positions.
+
+    On the first call the stick node is created. On every subsequent call
+    the existing GeomNode's vertex data is updated in-place — no node
+    removal or recreation, just overwriting endpoint positions. This is
+    O(n_bonds) float writes instead of O(n_bonds) Panda3D node operations.
 
     Args:
         instance_roots: Map of instance ID to molecule root NodePath.
@@ -747,7 +752,40 @@ def update_stick_bonds(
         aid_to_index = {
             int(n.getName().split("_")[1]): i for i, n in enumerate(atom_nodes)
         }
-        _draw_sticks(root, template, local_coords, aid_to_index)
+
+        if not np.all(np.isfinite(local_coords)) or np.max(np.abs(local_coords)) > 50.0:
+            continue
+
+        stick_np = root.find("stick_bonds")
+
+        if stick_np.isEmpty():
+            # First call: create the geometry
+            _draw_sticks(root, template, local_coords, aid_to_index)
+            continue
+
+        # Subsequent calls: update vertex positions in-place.
+        # LineSegs produces 2 vertices per segment (moveTo + drawTo).
+        # We overwrite them sequentially without touching the scene graph.
+        try:
+            geom_node = stick_np.node()
+            if geom_node.getNumGeoms() == 0:
+                continue
+            geom = geom_node.modifyGeom(0)
+            vdata = geom.modifyVertexData()
+            writer = GeomVertexWriter(vdata, "vertex")
+            writer.setRow(0)
+            for aid1, aid2 in zip(template.bonds_aid1, template.bonds_aid2):
+                idx1 = aid_to_index.get(int(aid1))
+                idx2 = aid_to_index.get(int(aid2))
+                if idx1 is None or idx2 is None:
+                    continue
+                p1 = local_coords[idx1]
+                p2 = local_coords[idx2]
+                writer.setData3f(float(p1[0]), float(p1[1]), float(p1[2]))
+                writer.setData3f(float(p2[0]), float(p2[1]), float(p2[2]))
+        except Exception:
+            # Fallback: recreate if in-place update fails
+            _draw_sticks(root, template, local_coords, aid_to_index)
 
 
 def replace_clouds_with_sticks(
