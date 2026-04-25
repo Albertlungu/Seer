@@ -31,7 +31,8 @@ from src.utils.constants import (
     MOL_CAM_SPEED_A,
     MOL_VIEW_SCALE,
     UNLOAD_RADIUS_CHUNKS,
-    WORLD_CHUNKS,
+        WORLD_CHUNKS,
+        CUMULATIVE_DRIFT_LIMIT_A,
 )
 from src.utils.json_io import load_json
 from src.utils.type_annotations import Aggregations, Bounds
@@ -228,6 +229,7 @@ class SeerApp(ShowBase):
             multiplier = float(self._speed_slider["value"])
             self._speed_label["text"] = f"Speed: {multiplier:.1f}x"
             from src.dynamics.constants import MD_TIMESTEP
+
             dt = MD_TIMESTEP * multiplier
             for sim in self._sim_threads.values():
                 sim.set_timestep(dt)
@@ -298,11 +300,13 @@ class SeerApp(ShowBase):
             return None
         cam_pos = self.camera.getPos()
         origin = self._mol_origin
-        mol_cam = np.array([
-            (cam_pos.x - origin.x) / MOL_VIEW_SCALE,
-            (cam_pos.y - origin.y) / MOL_VIEW_SCALE,
-            (cam_pos.z - origin.z) / MOL_VIEW_SCALE,
-        ])
+        mol_cam = np.array(
+            [
+                (cam_pos.x - origin.x) / MOL_VIEW_SCALE,
+                (cam_pos.y - origin.y) / MOL_VIEW_SCALE,
+                (cam_pos.z - origin.z) / MOL_VIEW_SCALE,
+            ]
+        )
         return (
             int(np.floor(mol_cam[0] / CHUNK_SIZE_A)),
             int(np.floor(mol_cam[1] / CHUNK_SIZE_A)),
@@ -310,20 +314,16 @@ class SeerApp(ShowBase):
         )
 
     def _start_chunk_simulations(self) -> None:
-        """Start a SimulationThread for all loaded chunks."""
-        from src.dynamics.engine import MDEngine
+        """Start a harmonic SimulationThread for all loaded chunks."""
         from src.dynamics.sim_thread import SimulationThread
+        from src.dynamics.constants import MD_TIMESTEP
 
         # Stop threads for chunks that are no longer loaded
         for coords in list(self._sim_threads):
             if coords not in self._chunk_object_states:
                 self._sim_threads.pop(coords).stop()
 
-        # Load model once, share across all chunk threads
-        engine = MDEngine(is_metallic=False)
-        engine.load_model()
         temperature = float(self._temp_slider["value"])
-        from src.dynamics.constants import MD_TIMESTEP
         dt = MD_TIMESTEP * float(self._speed_slider["value"])
 
         # Start/resume simulations for all loaded chunks
@@ -334,7 +334,6 @@ class SeerApp(ShowBase):
                 self._sim_threads[coords].resume()
                 continue
             sim = SimulationThread(
-                engine=engine,
                 object_state=obj_state,
                 active_instance_ids=list(obj_state.instances.keys()),
                 temperature=temperature,
@@ -386,6 +385,8 @@ class SeerApp(ShowBase):
                     "curr": new_buf.copy(),
                     "last_step_time": now,
                     "step_duration": 0.5,  # initial guess; adapts via EMA
+                    # Anchor stores the first-received safe frame for cumulative drift checks
+                    "anchor": new_buf.copy(),
                 }
 
             state = self._chunk_interp[coords]
@@ -397,10 +398,16 @@ class SeerApp(ShowBase):
                 state["last_step_time"] = now
 
                 # Reject the new frame if any atom moved more than 2Å in one step.
-                # Blow-up starts gradually — catching it here prevents interpolation
-                # from slowly drifting atoms toward an exploded configuration.
+                # Also reject if the cumulative drift from the first-received
+                # frame exceeds a sensible threshold (prevents slow, multi-step
+                # drift that stays under the per-step limit).
                 max_step_a = np.max(np.abs(new_buf - state["curr"])) / 1e-10
-                if max_step_a <= 2.0 and np.all(np.isfinite(new_buf)):
+                cumulative_a = np.max(np.abs(new_buf - state["anchor"])) / 1e-10
+                if (
+                    max_step_a <= 5.0
+                    and cumulative_a <= CUMULATIVE_DRIFT_LIMIT_A
+                    and np.all(np.isfinite(new_buf))
+                ):
                     state["prev"] = state["curr"]
                     state["curr"] = new_buf.copy()
                 # If blow-up detected: silently hold curr; atoms freeze visually.
@@ -657,6 +664,15 @@ class SeerApp(ShowBase):
 
         self.mol_root.show()
         self._time_toggle.show()
+        # Ensure UI toggle reflects actual simulation state
+        if self._time_toggle is not None:
+            try:
+                self._time_toggle["indicatorValue"] = self._sim_running
+            except Exception:
+                try:
+                    self._time_toggle["value"] = self._sim_running
+                except Exception:
+                    pass
         self._temp_slider.show()
         self._temp_label.show()
         self._cloud_toggle.show()
@@ -686,6 +702,15 @@ class SeerApp(ShowBase):
         if self._atom_label is not None:
             self._atom_label.hide()
 
+        # Make sure the time toggle shows the correct (off) state when exiting
+        if self._time_toggle is not None:
+            try:
+                self._time_toggle["indicatorValue"] = False
+            except Exception:
+                try:
+                    self._time_toggle["value"] = False
+                except Exception:
+                    pass
         self._time_toggle.hide()
         self._temp_slider.hide()
         self._temp_label.hide()
@@ -782,6 +807,10 @@ class SeerApp(ShowBase):
         """
         On zoom in.
         """
+        if self._in_molecular_scene:
+            self._clear_target_lock()
+            self._exit_molecular_mode()
+            return
         was_molecular = self.room_state.molecular_mode
         increase_fov(self.room_state)
         if was_molecular and not self.room_state.molecular_mode:

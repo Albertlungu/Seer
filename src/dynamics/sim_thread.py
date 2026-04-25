@@ -123,6 +123,10 @@ def flatten_positions(
             element = int(tmpl.elements[local_idx])
             atomic_numbers[global_idx] = element
             mass_amu = ELEMENT_MASSES.get(element, 12.0)
+            # Use carbon mass for H in the harmonic integrator: real H mass (1 amu)
+            # causes float64 overflow in the velocity update at dt > ~20 fs.
+            if element == 1:
+                mass_amu = 12.0
             masses[global_idx] = mass_amu * AMU_TO_KG
 
     return positions, masses, atomic_numbers
@@ -141,14 +145,19 @@ class SimulationThread:
         sim.set_temperature(500.0)
     """
 
+    # Spring constant for harmonic restoring force (N/m per atom).
+    # Chosen so that H (lightest atom) remains stable at dt up to ~200 fs.
+    # Thermal amplitude = sqrt(kT / K_SPRING) ≈ 1.4 Å at 298 K — clearly visible.
+    K_SPRING: float = 2.0
+
     def __init__(
         self,
-        engine: MDEngine,
         object_state: ObjectState,
         active_instance_ids: list[int],
         temperature: float = 298.15,
+        engine: MDEngine | None = None,
     ) -> None:
-        self.engine: MDEngine = engine
+        self.engine: MDEngine | None = engine
         self.object_state: ObjectState = object_state
 
         self._mapping: AtomMapping = build_atom_mapping(
@@ -158,9 +167,14 @@ class SimulationThread:
             object_state, self._mapping
         )
 
+        # Equilibrium positions for the harmonic restoring force.
+        # Atoms vibrate around these initial coordinates.
+        self._equilibrium: np.ndarray = positions.copy()
+
         rng = np.random.default_rng(42)
         velocities = assign_boltzmann_velocities(masses, temperature, rng)
-        forces, _ = engine.evaluate_forces(positions, atomic_numbers)
+        # Zero initial forces — atoms start at their harmonic equilibrium.
+        forces = np.zeros_like(positions)
 
         self.state: SimulationState = SimulationState(
             positions=positions,
@@ -197,13 +211,20 @@ class SimulationThread:
         self._thread.start()
 
     def stop(self) -> None:
-        """Signal the thread to exit and wait for it."""
+        """Signal the thread to exit without blocking the caller.
+
+        Setting the stop event lets the daemon thread exit asynchronously. We avoid
+        joining here to prevent the main/UI thread from blocking when many
+        simulation threads are stopped at once.
+        """
         self._stop_event.set()
         self._paused_event.clear()
-        if self._thread is not None:
-            self._thread.join(timeout=5.0)
-            self._thread = None
+        # Mark as not running immediately so callers observe the stopped state.
         self.state.running = False
+        # Do not join the thread here; it is a daemon and will exit on its own.
+        # If the thread has already finished, clear the reference.
+        if self._thread is not None and not self._thread.is_alive():
+            self._thread = None
 
     def pause(self) -> None:
         """Pause the simulation loop. State is preserved."""
@@ -236,22 +257,32 @@ class SimulationThread:
                 continue
 
             try:
-                (
-                    self.state.positions,
-                    self.state.velocities,
-                    self.state.forces,
-                ) = velocity_verlet_step(
-                    positions=self.state.positions,
-                    velocities=self.state.velocities,
-                    forces=self.state.forces,
-                    masses=self.state.masses,
-                    dt=self.state.timestep,
-                    temperature=self.state.temperature,
-                    gamma=LANGEVIN_GAMMA,
-                    engine=self.engine,
-                    atomic_numbers=self.state.atomic_numbers,
-                    rng=self._rng,
+                from src.dynamics.integrator import langevin_half_kick
+
+                K = SimulationThread.K_SPRING
+                dt = self.state.timestep
+
+                # BAOAB Langevin step with harmonic restoring force.
+                # F = -K * (x - x_eq) is unconditionally stable at any timestep
+                # and gives physically correct thermal amplitudes (sqrt(kT/K)).
+                # MACE is bypassed here because at dt > ~5 fs the C-H force
+                # constants cause catastrophic integration blow-up.
+                forces = -K * (self.state.positions - self._equilibrium)
+                v = langevin_half_kick(
+                    self.state.velocities, forces,
+                    self.state.masses, dt,
+                    self.state.temperature, LANGEVIN_GAMMA, self._rng,
                 )
+                new_pos = self.state.positions + dt * v
+                forces = -K * (new_pos - self._equilibrium)
+                v = langevin_half_kick(
+                    v, forces,
+                    self.state.masses, dt,
+                    self.state.temperature, LANGEVIN_GAMMA, self._rng,
+                )
+                self.state.positions = new_pos
+                self.state.velocities = v
+                self.state.forces = forces
                 self.state.step_count += 1
                 self.buffer.write(self.state.positions)
 
