@@ -231,7 +231,7 @@ class SeerApp(ShowBase):
             from src.dynamics.constants import MD_TIMESTEP
 
             dt = MD_TIMESTEP * multiplier
-            for sim in self._sim_threads.values():
+            for sim in list(self._sim_threads.values()):
                 sim.set_timestep(dt)
 
         self._speed_slider: DirectSlider = DirectSlider(

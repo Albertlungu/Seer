@@ -72,8 +72,12 @@ UNLOAD_RADIUS_CHUNKS: int = 2
 MOL_CAM_SPEED_A: float = 50.0
 MOL_VIEW_SCALE: float = 0.01
 MAX_CHUNKS_PER_FRAME: int = 2
-CHUNK_MOL_COUNT_PER_TEMPLATE: int = 2
+CHUNK_MOL_COUNT_PER_TEMPLATE: int = 4
 WORLD_CHUNKS: int = 10  # World loops every WORLD_CHUNKS * CHUNK_SIZE_A Angstroms per axis
+
+# Maximum allowed cumulative drift (from first-received frame) in Angstroms
+# Prevents very slow, multi-step blow-ups that per-step guards miss.
+CUMULATIVE_DRIFT_LIMIT_A: float = 20.0
 
 # ---------------------------------------------------------------------------
 # Crystal structure element classification
