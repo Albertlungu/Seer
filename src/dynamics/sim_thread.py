@@ -134,21 +134,21 @@ def flatten_positions(
 
 class SimulationThread:
     """
-    Runs the MD loop on a background daemon thread.
+    Runs a bond-spring harmonic MD loop on a background daemon thread.
 
-    Usage:
-        sim = SimulationThread(engine, object_state, active_ids)
-        sim.start()
-        sim.pause()
-        sim.resume()
-        sim.stop()
-        sim.set_temperature(500.0)
+    Forces:
+      Bond springs  F_bond = K_BOND * (r_ij - r_ij_eq)     — preserves molecular shape
+      Atom anchor   F_anchor = -K_ANCHOR * (x - x_eq)       — prevents unlimited drift
+      Langevin thermostat                                     — controls temperature
+
+    Internal timestep is fixed at 1 fs for stability regardless of the speed
+    slider. set_timestep() maps the slider value to steps_per_write, controlling
+    how many fs of simulation time are advanced each buffer write (visual speed).
     """
 
-    # Spring constant for harmonic restoring force (N/m per atom).
-    # Chosen so that H (lightest atom) remains stable at dt up to ~200 fs.
-    # Thermal amplitude = sqrt(kT / K_SPRING) ≈ 1.4 Å at 298 K — clearly visible.
-    K_SPRING: float = 2.0
+    HARMONIC_DT: float = 1e-15   # 1 fs — stable for K_BOND up to ~200 N/m
+    K_BOND: float = 200.0         # N/m — bond springs; gives ~0.14 Å σ_bond at 298 K
+    K_ANCHOR: float = 0.5         # N/m — weak per-atom anchor; prevents drift
 
     def __init__(
         self,
@@ -167,23 +167,47 @@ class SimulationThread:
             object_state, self._mapping
         )
 
-        # Equilibrium positions for the harmonic restoring force.
-        # Atoms vibrate around these initial coordinates.
         self._equilibrium: np.ndarray = positions.copy()
+
+        # Precompute bond spring data from molecular topology.
+        # For each bond: (flat_i, flat_j) index pair and equilibrium bond vector.
+        f1_list: list[int] = []
+        f2_list: list[int] = []
+        for iid, (start, _end) in self._mapping.instance_to_sim_range.items():
+            inst = object_state.instances[iid]
+            tmpl = object_state.templates[inst.template_id]
+            aid_to_local = {int(aid): i for i, aid in enumerate(tmpl.aids)}
+            for a1, a2 in zip(tmpl.bonds_aid1, tmpl.bonds_aid2):
+                l1 = aid_to_local.get(int(a1))
+                l2 = aid_to_local.get(int(a2))
+                if l1 is not None and l2 is not None:
+                    f1_list.append(start + l1)
+                    f2_list.append(start + l2)
+
+        self._bond_f1: np.ndarray = np.array(f1_list, dtype=np.intp)
+        self._bond_f2: np.ndarray = np.array(f2_list, dtype=np.intp)
+        # Equilibrium bond vectors: r_j_eq - r_i_eq for each bond
+        if len(f1_list):
+            self._bond_eq: np.ndarray = (
+                positions[self._bond_f2] - positions[self._bond_f1]
+            )
+        else:
+            self._bond_eq = np.zeros((0, 3))
+
+        # Steps per buffer write; controlled by set_timestep via speed slider
+        self._steps_per_write: int = 50
 
         rng = np.random.default_rng(42)
         velocities = assign_boltzmann_velocities(masses, temperature, rng)
-        # Zero initial forces — atoms start at their harmonic equilibrium.
-        forces = np.zeros_like(positions)
 
         self.state: SimulationState = SimulationState(
             positions=positions,
             velocities=velocities,
-            forces=forces,
+            forces=np.zeros_like(positions),
             masses=masses,
             atomic_numbers=atomic_numbers,
             temperature=temperature,
-            timestep=MD_TIMESTEP,
+            timestep=self.HARMONIC_DT,
         )
 
         self.buffer: SharedPositionBuffer = SharedPositionBuffer(
@@ -246,45 +270,57 @@ class SimulationThread:
         self.state.temperature = max(0.0, temperature)
 
     def set_timestep(self, dt: float) -> None:
-        """Update the integration timestep. Takes effect on the next step."""
-        self.state.timestep = max(1e-16, dt)
+        """Map speed-slider value to steps_per_write for the harmonic integrator."""
+        self._steps_per_write = max(1, int(dt / self.HARMONIC_DT))
+
+    def _compute_forces(self, positions: np.ndarray) -> np.ndarray:
+        """
+        Bond springs + weak per-atom anchor.
+
+        Bond springs keep bond lengths near equilibrium (~0.14 Å σ at 298 K),
+        preserving the molecule's shape. The anchor (K_ANCHOR << K_BOND) prevents
+        the whole molecule from drifting arbitrarily far.
+        """
+        forces = -self.K_ANCHOR * (positions - self._equilibrium)
+
+        if len(self._bond_f1):
+            delta = (
+                positions[self._bond_f2] - positions[self._bond_f1] - self._bond_eq
+            )
+            bond_f = self.K_BOND * delta
+            np.add.at(forces, self._bond_f1, bond_f)
+            np.add.at(forces, self._bond_f2, -bond_f)
+
+        return forces
 
     def _run(self) -> None:
-        """Main loop executed on the background thread."""
+        """Main loop: run _steps_per_write BAOAB steps then write buffer once."""
+        from src.dynamics.integrator import langevin_half_kick
+
         while not self._stop_event.is_set():
             if self._paused_event.is_set():
                 time.sleep(0.001)
                 continue
 
             try:
-                from src.dynamics.integrator import langevin_half_kick
+                dt = self.HARMONIC_DT
+                pos = self.state.positions
+                vel = self.state.velocities
+                masses = self.state.masses
+                T = self.state.temperature
 
-                K = SimulationThread.K_SPRING
-                dt = self.state.timestep
+                for _ in range(self._steps_per_write):
+                    f = self._compute_forces(pos)
+                    vel = langevin_half_kick(vel, f, masses, dt, T, LANGEVIN_GAMMA, self._rng)
+                    pos = pos + dt * vel
+                    f = self._compute_forces(pos)
+                    vel = langevin_half_kick(vel, f, masses, dt, T, LANGEVIN_GAMMA, self._rng)
 
-                # BAOAB Langevin step with harmonic restoring force.
-                # F = -K * (x - x_eq) is unconditionally stable at any timestep
-                # and gives physically correct thermal amplitudes (sqrt(kT/K)).
-                # MACE is bypassed here because at dt > ~5 fs the C-H force
-                # constants cause catastrophic integration blow-up.
-                forces = -K * (self.state.positions - self._equilibrium)
-                v = langevin_half_kick(
-                    self.state.velocities, forces,
-                    self.state.masses, dt,
-                    self.state.temperature, LANGEVIN_GAMMA, self._rng,
-                )
-                new_pos = self.state.positions + dt * v
-                forces = -K * (new_pos - self._equilibrium)
-                v = langevin_half_kick(
-                    v, forces,
-                    self.state.masses, dt,
-                    self.state.temperature, LANGEVIN_GAMMA, self._rng,
-                )
-                self.state.positions = new_pos
-                self.state.velocities = v
-                self.state.forces = forces
-                self.state.step_count += 1
-                self.buffer.write(self.state.positions)
+                self.state.positions = pos
+                self.state.velocities = vel
+                self.state.forces = self._compute_forces(pos)
+                self.state.step_count += self._steps_per_write
+                self.buffer.write(pos)
 
             except Exception as exc:
                 logger.error("MD thread error: %s", exc, exc_info=True)
