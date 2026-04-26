@@ -85,6 +85,25 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          body: |
+            ## Installation
+
+            **macOS**
+            1. Open the `.dmg` file
+            2. Open a new Finder window and navigate to your Applications folder
+            3. Drag `Seer.app` into Applications
+            4. Try to open the app — macOS will likely block it the first time
+            5. Go to **System Settings > Privacy & Security**, scroll down, and click **Open Anyway** next to the Seer entry
+            6. If it still won't open, run this in Terminal:
+            ```
+            xattr -dr com.apple.quarantine /Applications/Seer.app
+            ```
+
+            **Windows**
+            Unzip and run `Seer.exe` inside the folder.
+
+            **Linux**
+            Extract the `.tar.gz` and run the `Seer` binary.
           files: |
             Seer-macOS.dmg/Seer-macOS.dmg
             Seer-Windows.zip/Seer-Windows.zip
