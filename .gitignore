@@ -224,3 +224,13 @@ data/vision_json/legacy
 # Test scripts
 tests/
 tasks
+errors
+# Build artifacts
+Seer.app/
+Seer/
+dmg-stage/
+release-venv/
+python-embed/
+*.dmg
+seer-demo.mp4
+logs/

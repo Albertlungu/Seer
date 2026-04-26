@@ -32,19 +32,57 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install production dependencies
-        run: pip install -r requirements-prod.txt pyinstaller pyinstaller-hooks-contrib
-
-      - name: Build with PyInstaller
-        run: pyinstaller seer.spec
-
-      # ── macOS: wrap dist/Seer.app into a .dmg ──────────────────────────
-      - name: Create DMG (macOS)
+      # ── macOS ──────────────────────────────────────────────────────────────
+      - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
+          python -m venv --copies release-venv
+          release-venv/bin/pip install --upgrade pip
+          release-venv/bin/pip install -r requirements-prod.txt
+
+          mkdir -p Seer.app/Contents/MacOS
+          mkdir -p Seer.app/Contents/Resources
+
+          # Launcher script
+          cat > Seer.app/Contents/MacOS/Seer << 'EOF'
+          #!/bin/bash
+          RESOURCES="$(cd "$(dirname "$0")/../Resources" && pwd)"
+          exec "$RESOURCES/release-venv/bin/python" "$RESOURCES/main.py"
+          EOF
+          chmod +x Seer.app/Contents/MacOS/Seer
+
+          # Info.plist
+          cat > Seer.app/Contents/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>Seer</string>
+            <key>CFBundleExecutable</key><string>Seer</string>
+            <key>CFBundleIdentifier</key><string>com.seer.molecular</string>
+            <key>CFBundleVersion</key><string>1.0.0</string>
+            <key>CFBundleShortVersionString</key><string>1.0.0</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleIconFile</key><string>AppIcon</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>LSMinimumSystemVersion</key><string>12.0</string>
+          </dict>
+          </plist>
+          EOF
+
+          # App icon
+          cp assets/seer-icon.icns Seer.app/Contents/Resources/AppIcon.icns
+
+          # Source and data
+          cp main.py Seer.app/Contents/Resources/
+          cp -r src Seer.app/Contents/Resources/
+          cp -r data Seer.app/Contents/Resources/
+          cp -r release-venv Seer.app/Contents/Resources/
+
+          # DMG
           brew install create-dmg
           mkdir dmg-stage
-          cp -r dist/Seer.app dmg-stage/Seer.app
+          cp -r Seer.app dmg-stage/Seer.app
           create-dmg \
             --volname "Seer" \
             --background "assets/dmg-background.png" \
@@ -55,16 +93,64 @@ jobs:
             "${{ matrix.artifact_name }}" \
             dmg-stage
 
-      # ── Windows: zip dist/Seer/ ─────────────────────────────────────────
-      - name: Package (Windows)
+      # ── Windows ────────────────────────────────────────────────────────────
+      - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path dist\Seer -DestinationPath "${{ matrix.artifact_name }}"
+        run: |
+          # Use the Python embeddable distribution for a fully self-contained bundle
+          $pyver = "3.12.9"
+          $embed = "python-$pyver-embed-amd64.zip"
+          Invoke-WebRequest "https://www.python.org/ftp/python/$pyver/$embed" -OutFile $embed
+          Expand-Archive $embed -DestinationPath python-embed
 
-      # ── Linux: tar dist/Seer/ ───────────────────────────────────────────
-      - name: Package (Linux)
+          # Enable site-packages in the embeddable distribution
+          (Get-Content "python-embed/python312._pth") -replace '#import site','import site' |
+            Set-Content "python-embed/python312._pth"
+
+          # Bootstrap pip and install deps directly into the embed
+          Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile get-pip.py
+          python-embed/python.exe get-pip.py --no-warn-script-location
+          python-embed/python.exe -m pip install -r requirements-prod.txt `
+            --no-warn-script-location
+
+          # Assemble bundle folder
+          New-Item -ItemType Directory -Path Seer | Out-Null
+          Copy-Item main.py Seer/
+          Copy-Item -Recurse src Seer/src
+          Copy-Item -Recurse data Seer/data
+          Copy-Item -Recurse python-embed Seer/python-embed
+
+          # Launcher
+          @'
+          @echo off
+          "%~dp0python-embed\python.exe" "%~dp0main.py"
+          '@ | Set-Content Seer/Seer.bat
+
+          Compress-Archive -Path Seer -DestinationPath "${{ matrix.artifact_name }}"
+
+      # ── Linux ──────────────────────────────────────────────────────────────
+      - name: Build (Linux)
         if: runner.os == 'Linux'
-        run: tar -czf "${{ matrix.artifact_name }}" -C dist Seer
+        run: |
+          python -m venv --copies release-venv
+          release-venv/bin/pip install --upgrade pip
+          release-venv/bin/pip install -r requirements-prod.txt
+
+          mkdir Seer
+          cp main.py Seer/
+          cp -r src Seer/src
+          cp -r data Seer/data
+          cp -r release-venv Seer/release-venv
+
+          cat > Seer/Seer.sh << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          exec "$DIR/release-venv/bin/python" "$DIR/main.py"
+          EOF
+          chmod +x Seer/Seer.sh
+
+          tar -czf "${{ matrix.artifact_name }}" Seer
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -72,7 +158,7 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}
 
-  # Create a GitHub release and attach all three artifacts when a tag is pushed
+  # ── Release ──────────────────────────────────────────────────────────────
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
@@ -88,12 +174,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body: |
+            ## Demo
+
+            https://cdn.hackclub.com/019dc7c5-9869-71f2-969a-f2bd21197075/seer-demo.mp4
+
             ## Installation
 
             **macOS**
             1. Open the `.dmg` file
             2. Drag `Seer.app` into Applications
-            3. Try to open the app. It will most likely fail.
+            3. Try to open the app. It will most likely fail the first time.
             4. If it fails, run this in Terminal:
             ```
             xattr -dr com.apple.quarantine /Applications/Seer.app
@@ -101,11 +191,10 @@ jobs:
             5. Go to `System Settings > Privacy & Security`, scroll down, and click `Open Anyway` next to the Seer entry
 
             **Windows**
-            Unzip and run `Seer.exe` inside the folder.
+            Unzip and run `Seer.bat` inside the folder.
 
             **Linux**
-            Extract the `.tar.gz` and run the `Seer` binary.
-
+            Extract the `.tar.gz` and run `./Seer.sh`.
           files: |
             Seer-macOS.dmg/Seer-macOS.dmg
             Seer-Windows.zip/Seer-Windows.zip

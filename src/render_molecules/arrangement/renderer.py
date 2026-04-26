@@ -97,7 +97,7 @@ def create_atom_sphere(
 
     if base.loader is None:
         raise RuntimeError("ShowBase loader not initialized")
-    sphere = cast(NodePath, base.loader.loadModel("models/misc/sphere"))
+    sphere = cast(NodePath, base.loader.loadModel("models/misc/sphere.egg.pz"))
     sphere.setName(f"atom_{aid}")
 
     sphere.reparentTo(parent)
