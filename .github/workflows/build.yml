@@ -45,15 +45,13 @@ jobs:
           brew install create-dmg
           create-dmg \
             --volname "Seer" \
-            --volicon "dist/Seer.app/Contents/Resources/app.icns" \
+            --volicon "assets/seer-icon.icns" \
             --window-size 600 400 \
             --icon-size 128 \
             --icon "Seer.app" 150 200 \
             --app-drop-link 450 200 \
             "${{ matrix.artifact_name }}" \
-            "dist/Seer.app" || \
-          hdiutil create -volname Seer -srcfolder dist/Seer.app \
-            -ov -format UDZO "${{ matrix.artifact_name }}"
+            "dist/Seer.app"
 
       # ── Windows: zip dist/Seer/ ─────────────────────────────────────────
       - name: Package (Windows)

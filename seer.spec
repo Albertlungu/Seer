@@ -103,6 +103,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name="Seer.app",
+    icon="assets/seer-icon.icns",
     bundle_identifier="com.seer.molecular",
     info_plist={
         "NSHighResolutionCapable": True,
