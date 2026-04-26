@@ -184,7 +184,7 @@ def env_setup(loader: Loader, parent: NodePath, room_state: RoomState) -> NodePa
     """
 
     env: NodePath = loader.loadModel(
-        resource_path("data/reconstructions/obj/albert_room.obj")
+        resource_path("data/reconstructions/bam/albert_room.bam")
     )
     env.reparentTo(parent)
     env.setHpr(room_state.default_hpr)

@@ -29,7 +29,7 @@ a = Analysis(
     binaries=_pd3_libs,
     datas=[
         # Room geometry and molecular data
-        ("data/reconstructions/obj/albert_room.obj", "data/reconstructions/obj"),
+        ("data/reconstructions/bam/albert_room.bam", "data/reconstructions/bam"),
         ("data/vision_json/final_aggregated.json",   "data/vision_json"),
         # Panda3D built-in models (sphere, box, etc.)
         (_pd3_models, "panda3d/models"),
