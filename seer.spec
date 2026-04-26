@@ -53,7 +53,6 @@ a = Analysis(
         "src.dynamics.sim_thread",
         "src.dynamics.integrator",
         "src.dynamics.shared_buffer",
-        "src.dynamics.constants",
     ],
     hookspath=[],
     hooksconfig={},
