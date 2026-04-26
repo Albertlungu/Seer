@@ -89,24 +89,24 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body: |
-            Demo
-            https://cdn.hackclub.com/019dc7c5-9869-71f2-969a-f2bd21197075/seer-demo.mp4
+            ## Installation
 
-            Installation
-            macOS
-
-            Open the .dmg file
-            Open a new Finder window and navigate to your Applications folder
-            Drag Seer.app into Applications
-            Try to open the app — macOS will likely block it the first time
-            Go to System Settings > Privacy & Security, scroll down, and click Open Anyway next to the Seer entry
-            If it still won't open, run this in Terminal:
+            **macOS**
+            1. Open the `.dmg` file
+            2. Drag `Seer.app` into Applications
+            3. Try to open the app. It will most likely fail.
+            4. If it fails, run this in Terminal:
+            ```
             xattr -dr com.apple.quarantine /Applications/Seer.app
-            Windows
-            Unzip and run Seer.exe inside the folder.
+            ```
+            5. Go to `System Settings > Privacy & Security`, scroll down, and click `Open Anyway` next to the Seer entry
 
-            Linux
-            Extract the .tar.gz and run the Seer binary.
+            **Windows**
+            Unzip and run `Seer.exe` inside the folder.
+
+            **Linux**
+            Extract the `.tar.gz` and run the `Seer` binary.
+
           files: |
             Seer-macOS.dmg/Seer-macOS.dmg
             Seer-Windows.zip/Seer-Windows.zip
