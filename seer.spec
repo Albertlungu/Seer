@@ -10,6 +10,7 @@ Produces:
     dist/Seer/        (Windows / Linux — zip or tar for distribution)
 """
 
+import glob
 import os
 import panda3d
 from PyInstaller.utils.hooks import collect_dynamic_libs
@@ -30,6 +31,8 @@ a = Analysis(
     datas=[
         # Room geometry and molecular data
         ("data/reconstructions/bam/albert_room.bam", "data/reconstructions/bam"),
+        # Textures referenced by the bam as ../obj/*.png
+        *[(f, "data/reconstructions/obj") for f in glob.glob("data/reconstructions/obj/*.png")],
         ("data/vision_json/final_aggregated.json",   "data/vision_json"),
         # Panda3D built-in models (sphere, box, etc.)
         (_pd3_models, "panda3d/models"),
