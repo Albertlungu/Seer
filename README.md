@@ -2,52 +2,143 @@
 
 Most tools let you zoom in. Seer lets you zoom all the way in.
 
-The question that started this: _what would it actually feel like to hold an electron?_ Not a diagram. Not a textbook illustration. The real thing — at the scale it exists, with accurate geometry, bonds, orbitals, and structure all the way down.
+You walk around a real 3D room scan, zoom into any object, and descend into its actual molecular structure — the real chemical composition of the material, sourced from PubChem. Atoms vibrate with thermal dynamics at adjustable temperature. Walk in any direction and the molecular world keeps generating around you. The world loops so you never hit a wall.
 
-Seer is a personal experiment to find out. You film a room. The tool reconstructs it as a 3D environment you can walk through. Then you scroll — past the surface of objects, into the molecular structure of the materials they're made of, down to individual atoms, and eventually to fundamental particles. Every scale rendered as accurately as current theory allows.
-
-This is a work in progress. The reconstruction-to-annotation pipeline is working. The visualization side is still being built.
+Available for macOS, Windows, and Linux. [Download the latest release.](../../releases/latest)
 
 ---
 
 ## What Works Now
 
-- Video to 3D model via Apple Photogrammetry (macOS only)
-- Interactive 3D environment viewer with first-person navigation
-- Manual 3D bounding box annotation tool for labeling objects and materials
-- LLM-based material composition analysis (Deepseek via Ollama)
-- Molecular 3D structure retrieval from PubChem
-- Multi-molecule simulation in a vacuum (no zooming in yet, just the simulation)
-  - For placement: make sure no atoms from neighboring instances are intercepting upon render.
+- First-person 3D environment from a real room scan
+- Zoom from room scale to molecular scale by scrolling
+- Infinite procedurally-streamed molecular world (chunk-based, deterministic)
+- Real material composition from PubChem for each object
+- Electron density bond clouds (sigma and pi orbital structure)
+- Molecular dynamics: atoms vibrate with Langevin thermostat at adjustable temperature
+- Stick bonds during dynamics, clouds when paused
+- Atom scale slider, temperature slider, speed slider
+- Toroidal world boundary (walking off one edge brings you back from the other)
+- Cross-platform packaged releases (macOS .dmg, Windows .zip, Linux .tar.gz)
 
 ## Roadmap
 
-- Adding of temporal dimension with force-fields and other elements
-- Molecular visualization: rendering atoms and bonds inside the viewer
-- Atomic level: Bohr model and quantum mechanical orbital representation
-- Subatomic level: protons, neutrons
-- Fundamental particles: electrons, quarks, bosons, leptons
+- MACE force field at stable timestep for physically accurate inter-atomic forces
+- Atomic level: quantum mechanical orbital representation
+- Subatomic level: protons, neutrons, fundamental particles
 
 ---
 
-## Pipeline
+## Controls
 
-```text
-Video
-  └─ Extract frames          src/video_processing/reconstruction/vid_to_imgs.py
-       └─ Apple Photogrammetry → USDZ
-            └─ Convert to OBJ + textures   src/video_processing/view_reconstruction.py
-                 └─ Annotate objects + materials   src/video_processing/material_tagging/annotator.py
-                      └─ LLM: material → molecules   src/video_processing/material_tagging/add_molecular_components.py
-                           └─ Fetch 3D structure per molecule   src/render_molecules/mol_details_pubchem.py
-                                └─ Interactive viewer   src/video_processing/environment.py  [WIP]
+| Input | Action |
+| --- | --- |
+| `WASD` | Move |
+| Mouse | Look |
+| Scroll down | Zoom in (enters molecular mode when close enough) |
+| Scroll up | Zoom out (exits molecular mode) |
+| `Escape` | Toggle mouse lock |
+| `+` / `-` | Adjust movement speed |
+
+When in molecular mode, a panel appears on the right:
+
+| Control | Effect |
+| --- | --- |
+| **Time** toggle | Start / pause molecular dynamics |
+| **Temp** slider | Thermostat target (100–1000 K) |
+| **Speed** slider | Simulation speed (steps per frame) |
+| **Electron Clouds** toggle | Show/hide bond clouds |
+| **Atom Scale** slider | Slide between covalent and van der Waals radii |
+
+---
+
+## Using Your Own Room
+
+### 1. Film your room
+
+Record three slow passes around the perimeter of the room on your phone, one at each height: low (near floor), mid (waist), and high (near ceiling). Walk slowly and keep the camera pointed at the walls and objects. Overlap each pass generously. MP4 works fine.
+
+### 2. Extract frames
+
+```bash
+python -m src.video_processing.reconstruction.vid_to_imgs
+```
+
+Pulls frames at 2 FPS into `data/env_imgs/`.
+
+### 3. Run Apple Photogrammetry (macOS only)
+
+```bash
+python -m src.video_processing.reconstruction.run_swift_scan
+```
+
+Uses the native macOS photogrammetry pipeline to produce a USDZ model in `data/reconstructions/`.
+
+### 4. Convert to OBJ
+
+```bash
+python -m src.video_processing.view_reconstruction
+```
+
+Converts USDZ to OBJ + texture files in `data/reconstructions/obj/`.
+
+### 5. Convert OBJ to BAM
+
+The viewer loads Panda3D's native `.bam` format to avoid a runtime assimp issue in the packaged app.
+
+```bash
+python -c "
+from panda3d.core import loadPrcFileData
+loadPrcFileData('', 'window-type offscreen')
+from direct.showbase.ShowBase import ShowBase
+base = ShowBase()
+node = base.loader.loadModel('data/reconstructions/obj/albert_room.obj')
+node.writeBamFile('data/reconstructions/bam/albert_room.bam')
+base.destroy()
+print('Done')
+"
+```
+
+Then update the path in `src/video_processing/environment.py` and `seer.spec` to point to your new `.bam` file.
+
+### 6. Annotate objects and materials
+
+Draw 3D bounding boxes on the mesh and label each object's material.
+
+```bash
+source venv/bin/activate
+python src/video_processing/material_tagging/annotator.py
+```
+
+See annotator controls below.
+
+### 7. Identify molecular composition
+
+Sends material names to a local Deepseek LLM via Ollama to identify constituent molecules, then fetches their SMILES strings from PubChem.
+
+```bash
+python -m src.video_processing.material_tagging.add_molecular_components
+```
+
+### 8. Fetch 3D molecular structure
+
+Retrieves atomic coordinates and bond data per molecule from the PubChem REST API.
+
+```bash
+python -m src.render_molecules.processing.mol_details_pubchem
+```
+
+### 9. Run the viewer
+
+```bash
+python main.py
 ```
 
 ---
 
 ## Setup
 
-Requires Python 3.12+. The photogrammetry stage requires macOS.
+Requires Python 3.12.
 
 ```bash
 chmod +x setup.sh
@@ -56,66 +147,20 @@ chmod +x setup.sh
 
 ---
 
-## Running Each Stage
-
-### 1. Extract frames from video
-
-Pulls frames from an MP4 at 2 FPS into `data/env_imgs/`.
+## Building a Release
 
 ```bash
-python -m src.video_processing.reconstruction.vid_to_imgs
+pip install pyinstaller pyinstaller-hooks-contrib
+pyinstaller seer.spec
 ```
 
-### 2. Run Apple Photogrammetry
-
-Calls the native macOS photogrammetry pipeline to produce a USDZ model.
+The result is in `dist/Seer.app` (macOS), `dist/Seer/` (Windows/Linux). To create a GitHub release for all three platforms, push a version tag:
 
 ```bash
-python -m src.video_processing.reconstruction.run_swift_scan
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
-### 3. Convert and inspect the 3D model
-
-Converts USDZ to OBJ, extracts textures, and opens a preview.
-
-```bash
-python -m src.video_processing.view_reconstruction
-```
-
-### 4. Annotate objects and materials
-
-Interactive tool for drawing 3D bounding boxes directly on the mesh. See controls below.
-
-```bash
-source venv/bin/activate
-python src/video_processing/material_tagging/annotator.py
-```
-
-### 5. Identify molecular composition
-
-Sends annotated materials to a local Deepseek LLM to identify constituent molecules, then looks up their SMILES strings via PubChem.
-
-```bash
-python -m src.video_processing.material_tagging.add_molecular_components
-```
-
-### 6. Fetch 3D molecular structure
-
-Retrieves atomic coordinates and bond data for each molecule from the PubChem API.
-
-```bash
-python -m src.render_molecules.mol_details_pubchem
-```
-
-### 7. Open the environment viewer
-
-Loads the OBJ and walks around the reconstructed scene.
-
-```bash
-python -m src.video_processing.environment
-```
-
-Controls: `WASD` to move, mouse to look, scroll to zoom, `Escape` to toggle mouse lock, `+`/`-` to adjust speed.
+GitHub Actions will build and attach the installers automatically.
 
 ---
 
@@ -130,22 +175,37 @@ Controls: `WASD` to move, mouse to look, scroll to zoom, `Escape` to toggle mous
 | mouse move | height | preview extrusion height |
 | `Mouse1` | height | lock height, spawn corner handles |
 | `Mouse1` + drag | on handle | resize box |
-| `Mouse1` release | on handle | release |
 | `Space` | editing | save object name and materials |
-| `Tab` | any | discard current box, next color |
+| `Tab` | any | discard current box |
 | `Ctrl+S` | any | save all annotations |
 
-Annotations are written to `data/vision_json/annotations.json`. Each entry includes the object name, materials, bottom/top corner coordinates, and base normal.
+Annotations are saved to `data/vision_json/annotations.json`.
+
+---
+
+## Pipeline
+
+```text
+Video
+  └─ Extract frames          src/video_processing/reconstruction/vid_to_imgs.py
+       └─ Apple Photogrammetry → USDZ
+            └─ Convert to OBJ + textures   src/video_processing/view_reconstruction.py
+                 └─ Convert OBJ to BAM     (one-time python command above)
+                      └─ Annotate objects + materials   src/video_processing/material_tagging/annotator.py
+                           └─ LLM: material → molecules   src/video_processing/material_tagging/add_molecular_components.py
+                                └─ Fetch 3D structure per molecule   src/render_molecules/processing/mol_details_pubchem.py
+                                     └─ Interactive viewer   main.py
+```
 
 ---
 
 ## Optional Dependency
 
-`aspose-3d` is only needed for USDZ to OBJ conversion in stage 3. Install it manually if you need that step:
+`aspose-3d` is only needed for USDZ to OBJ conversion. Install it manually if needed:
 
 ```bash
 pip install aspose-3d
 ```
 
 > [!NOTE]
-> On macOS Apple Silicon (`arm64`), a compatible `aspose-3d` wheel may be unavailable. Use an alternative USDZ converter or an `x86_64` Python environment in that case.
+> On macOS Apple Silicon, a compatible `aspose-3d` wheel may be unavailable. Use an alternative USDZ converter or an `x86_64` Python environment in that case.
