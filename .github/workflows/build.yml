@@ -37,7 +37,8 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           # Fetch a self-contained Python (no external framework dependencies)
-          PBS_URL=$(curl -s "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" | \
+          PBS_URL=$(curl -s -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" | \
             python3 -c "
           import sys, json
           data = json.load(sys.stdin)
@@ -138,7 +139,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           # Fetch a self-contained Python for Linux x86_64
-          PBS_URL=$(curl -s "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" | \
+          PBS_URL=$(curl -s -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" | \
             python3 -c "
           import sys, json
           data = json.load(sys.stdin)

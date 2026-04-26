@@ -7,17 +7,7 @@ echo "Building Seer.app locally..."
 rm -rf python pbs.tar.gz Seer.app dmg-stage Seer-macOS.dmg
 
 # Fetch self-contained Python (no external framework dependencies)
-PBS_URL=$(curl -s "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" | \
-  python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-for a in data['assets']:
-    n = a['name']
-    if '3.12' in n and 'aarch64-apple-darwin' in n and 'install_only' in n and n.endswith('.tar.gz'):
-        print(a['browser_download_url']); break
-")
-echo "Downloading $PBS_URL ..."
-curl -L "$PBS_URL" -o pbs.tar.gz
+curl -L "https://github.com/indygreg/python-build-standalone/releases/download/20250127/cpython-3.12.9+20250127-aarch64-apple-darwin-install_only.tar.gz" -o pbs.tar.gz
 tar -xf pbs.tar.gz   # extracts to python/
 rm pbs.tar.gz
 
