@@ -14,7 +14,6 @@ if getattr(sys, "frozen", False):
 
     base = sys._MEIPASS  # type: ignore[attr-defined]
     pd3_dir = os.path.join(base, "panda3d")
-    model_dir = os.path.join(pd3_dir, "models")
 
     loadPrcFileData("", "\n".join([
         # Tell Panda3D where to find the display plugin (libpandagl.dylib etc.)
@@ -22,8 +21,8 @@ if getattr(sys, "frozen", False):
         f"plugin-path {base}",
         # Load the OpenGL display backend
         "load-display pandagl",
-        # Model search paths
-        f"model-path {model_dir}",
+        # model-path must be the parent of "models/", so loadModel("models/misc/sphere") resolves correctly
+        f"model-path {pd3_dir}",
         f"model-path {base}",
     ]))
 
