@@ -36,22 +36,33 @@ jobs:
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          python -m venv --copies release-venv
-          release-venv/bin/pip install --upgrade pip
-          release-venv/bin/pip install -r requirements-prod.txt
+          # Fetch a self-contained Python (no external framework dependencies)
+          PBS_URL=$(curl -s "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" | \
+            python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          for a in data['assets']:
+              n = a['name']
+              if '3.12' in n and 'aarch64-apple-darwin' in n and 'install_only' in n and n.endswith('.tar.gz'):
+                  print(a['browser_download_url']); break
+          ")
+          curl -L "$PBS_URL" -o pbs.tar.gz
+          tar -xf pbs.tar.gz   # extracts to python/
 
+          python/bin/pip3 install --upgrade pip -q
+          python/bin/pip3 install -r requirements-prod.txt -q
+
+          # Assemble .app bundle
           mkdir -p Seer.app/Contents/MacOS
           mkdir -p Seer.app/Contents/Resources
 
-          # Launcher script
           cat > Seer.app/Contents/MacOS/Seer << 'EOF'
           #!/bin/bash
           RESOURCES="$(cd "$(dirname "$0")/../Resources" && pwd)"
-          exec "$RESOURCES/release-venv/bin/python" "$RESOURCES/main.py"
+          exec "$RESOURCES/python-dist/bin/python3" "$RESOURCES/main.py"
           EOF
           chmod +x Seer.app/Contents/MacOS/Seer
 
-          # Info.plist
           cat > Seer.app/Contents/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -70,14 +81,11 @@ jobs:
           </plist>
           EOF
 
-          # App icon
           cp assets/seer-icon.icns Seer.app/Contents/Resources/AppIcon.icns
-
-          # Source and data
           cp main.py Seer.app/Contents/Resources/
           cp -r src Seer.app/Contents/Resources/
           cp -r data Seer.app/Contents/Resources/
-          cp -r release-venv Seer.app/Contents/Resources/
+          cp -r python Seer.app/Contents/Resources/python-dist
 
           # DMG
           brew install create-dmg
@@ -98,30 +106,26 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Use the Python embeddable distribution for a fully self-contained bundle
+          # Python embeddable distribution is self-contained on Windows
           $pyver = "3.12.9"
           $embed = "python-$pyver-embed-amd64.zip"
           Invoke-WebRequest "https://www.python.org/ftp/python/$pyver/$embed" -OutFile $embed
           Expand-Archive $embed -DestinationPath python-embed
 
-          # Enable site-packages in the embeddable distribution
           (Get-Content "python-embed/python312._pth") -replace '#import site','import site' |
             Set-Content "python-embed/python312._pth"
 
-          # Bootstrap pip and install deps directly into the embed
           Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile get-pip.py
           python-embed/python.exe get-pip.py --no-warn-script-location
           python-embed/python.exe -m pip install -r requirements-prod.txt `
             --no-warn-script-location
 
-          # Assemble bundle folder
           New-Item -ItemType Directory -Path Seer | Out-Null
           Copy-Item main.py Seer/
           Copy-Item -Recurse src Seer/src
           Copy-Item -Recurse data Seer/data
           Copy-Item -Recurse python-embed Seer/python-embed
 
-          # Launcher
           @'
           @echo off
           "%~dp0python-embed\python.exe" "%~dp0main.py"
@@ -133,20 +137,32 @@ jobs:
       - name: Build (Linux)
         if: runner.os == 'Linux'
         run: |
-          python -m venv --copies release-venv
-          release-venv/bin/pip install --upgrade pip
-          release-venv/bin/pip install -r requirements-prod.txt
+          # Fetch a self-contained Python for Linux x86_64
+          PBS_URL=$(curl -s "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" | \
+            python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          for a in data['assets']:
+              n = a['name']
+              if '3.12' in n and 'x86_64-unknown-linux-gnu' in n and 'install_only' in n and n.endswith('.tar.gz'):
+                  print(a['browser_download_url']); break
+          ")
+          curl -L "$PBS_URL" -o pbs.tar.gz
+          tar -xf pbs.tar.gz   # extracts to python/
+
+          python/bin/pip3 install --upgrade pip -q
+          python/bin/pip3 install -r requirements-prod.txt -q
 
           mkdir Seer
           cp main.py Seer/
           cp -r src Seer/src
           cp -r data Seer/data
-          cp -r release-venv Seer/release-venv
+          cp -r python Seer/python-dist
 
           cat > Seer/Seer.sh << 'EOF'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          exec "$DIR/release-venv/bin/python" "$DIR/main.py"
+          exec "$DIR/python-dist/bin/python3" "$DIR/main.py"
           EOF
           chmod +x Seer/Seer.sh
 
@@ -158,7 +174,7 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}
 
-  # ── Release ──────────────────────────────────────────────────────────────
+  # ── Release ────────────────────────────────────────────────────────────────
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
