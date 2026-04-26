@@ -11,11 +11,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from src.dynamics.constants import (
+from src.utils.constants import (
     AMU_TO_KG,
+    HARMONIC_DT,
+    K_ANCHOR,
+    K_BOND,
     LANGEVIN_GAMMA,
-    MD_TIMESTEP,
-    STEPS_PER_BUFFER_WRITE,
 )
 from src.dynamics.engine import MDEngine
 from src.dynamics.integrator import (
@@ -146,10 +147,6 @@ class SimulationThread:
     how many fs of simulation time are advanced each buffer write (visual speed).
     """
 
-    HARMONIC_DT: float = 1e-15   # 1 fs — stable for K_BOND up to ~200 N/m
-    K_BOND: float = 200.0         # N/m — bond springs; gives ~0.14 Å σ_bond at 298 K
-    K_ANCHOR: float = 0.5         # N/m — weak per-atom anchor; prevents drift
-
     def __init__(
         self,
         object_state: ObjectState,
@@ -207,7 +204,7 @@ class SimulationThread:
             masses=masses,
             atomic_numbers=atomic_numbers,
             temperature=temperature,
-            timestep=self.HARMONIC_DT,
+            timestep=HARMONIC_DT,
         )
 
         self.buffer: SharedPositionBuffer = SharedPositionBuffer(
@@ -271,7 +268,7 @@ class SimulationThread:
 
     def set_timestep(self, dt: float) -> None:
         """Map speed-slider value to steps_per_write for the harmonic integrator."""
-        self._steps_per_write = max(1, int(dt / self.HARMONIC_DT))
+        self._steps_per_write = max(1, int(dt / HARMONIC_DT))
 
     def _compute_forces(self, positions: np.ndarray) -> np.ndarray:
         """
@@ -281,13 +278,13 @@ class SimulationThread:
         preserving the molecule's shape. The anchor (K_ANCHOR << K_BOND) prevents
         the whole molecule from drifting arbitrarily far.
         """
-        forces = -self.K_ANCHOR * (positions - self._equilibrium)
+        forces = -K_ANCHOR * (positions - self._equilibrium)
 
         if len(self._bond_f1):
             delta = (
                 positions[self._bond_f2] - positions[self._bond_f1] - self._bond_eq
             )
-            bond_f = self.K_BOND * delta
+            bond_f = K_BOND * delta
             np.add.at(forces, self._bond_f1, bond_f)
             np.add.at(forces, self._bond_f2, -bond_f)
 
@@ -303,7 +300,7 @@ class SimulationThread:
                 continue
 
             try:
-                dt = self.HARMONIC_DT
+                dt = HARMONIC_DT
                 pos = self.state.positions
                 vel = self.state.velocities
                 masses = self.state.masses

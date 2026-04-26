@@ -228,7 +228,7 @@ class SeerApp(ShowBase):
         def _update_speed() -> None:
             multiplier = float(self._speed_slider["value"])
             self._speed_label["text"] = f"Speed: {multiplier:.1f}x"
-            from src.dynamics.constants import MD_TIMESTEP
+            from src.utils.constants import MD_TIMESTEP
 
             dt = MD_TIMESTEP * multiplier
             for sim in list(self._sim_threads.values()):
@@ -316,7 +316,7 @@ class SeerApp(ShowBase):
     def _start_chunk_simulations(self) -> None:
         """Start a harmonic SimulationThread for all loaded chunks."""
         from src.dynamics.sim_thread import SimulationThread
-        from src.dynamics.constants import MD_TIMESTEP
+        from src.utils.constants import MD_TIMESTEP
 
         # Stop threads for chunks that are no longer loaded
         for coords in list(self._sim_threads):

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.dynamics.constants import BOLTZMANN_CONSTANT
+from src.utils.constants import BOLTZMANN_CONSTANT
 
 if TYPE_CHECKING:
     from src.dynamics.engine import MDEngine

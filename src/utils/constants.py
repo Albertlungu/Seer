@@ -79,11 +79,72 @@ WORLD_CHUNKS: int = 10  # World loops every WORLD_CHUNKS * CHUNK_SIZE_A Angstrom
 # Prevents very slow, multi-step blow-ups that per-step guards miss.
 CUMULATIVE_DRIFT_LIMIT_A: float = 20.0
 
-# ---------------------------------------------------------------------------
-# Crystal structure element classification
-# ---------------------------------------------------------------------------
-
 METALLIC_ELEMENTS: frozenset[int] = frozenset({
     13, 20, 22, 24, 25, 26, 27, 28, 29, 30, 47, 79,
-})
-"""Atomic numbers of common metallic elements encountered in household objects."""
+})  # Atomic numbers of common metallic elements encountered in household objects
+
+# ---------------------------------------------------------------------------
+# Physical constants (SI)
+# ---------------------------------------------------------------------------
+
+MD_TIMESTEP: float = 5e-14  # Integration timestep in seconds (50 fs)
+BOLTZMANN_CONSTANT: float = 1.380649e-23  # J/K, exact by 2019 SI redefinition
+LANGEVIN_GAMMA: float = 1e13  # Langevin collision frequency in s^-1 (~100 fs relaxation)
+DEFAULT_TEMPERATURE: float = 298.15  # Room temperature in Kelvin
+MIN_TEMPERATURE: float = 0.0  # Minimum slider value in Kelvin
+MAX_TEMPERATURE: float = 1000.0  # Maximum slider value in Kelvin
+EV_TO_JOULE: float = 1.602176634e-19  # eV to joules, exact by SI definition
+ANGSTROM_TO_METRE: float = 1e-10  # Angstroms to metres
+STEPS_PER_BUFFER_WRITE: int = 100  # MD steps between each shared buffer write
+AMU_TO_KG: float = 1.66053906660e-27  # Atomic mass units to kg per atom
+
+# ---------------------------------------------------------------------------
+# Harmonic bond-spring integrator constants (SimulationThread)
+# ---------------------------------------------------------------------------
+
+HARMONIC_DT: float = 1e-15  # Internal fixed timestep in seconds (1 fs); do not increase
+K_BOND: float = 200.0  # Bond spring constant in N/m; gives ~0.14 Å bond fluctuation at 298 K
+K_ANCHOR: float = 0.5  # Weak per-atom anchor spring in N/m; prevents unlimited drift
+
+# ---------------------------------------------------------------------------
+# Crystal structures: atomic_number -> (type, lattice_param_m, basis_fractional)
+# ---------------------------------------------------------------------------
+
+CRYSTAL_STRUCTURES: dict[int, tuple[str, float, list[list[float]]]] = {
+    13: (
+        "fcc",
+        4.0495e-10,
+        [[0, 0, 0], [0.5, 0.5, 0], [0.5, 0, 0.5], [0, 0.5, 0.5]],
+    ),
+    14: (
+        "diamond",
+        5.4310e-10,
+        [
+            [0, 0, 0],
+            [0.5, 0.5, 0],
+            [0.5, 0, 0.5],
+            [0, 0.5, 0.5],
+            [0.25, 0.25, 0.25],
+            [0.75, 0.75, 0.25],
+            [0.75, 0.25, 0.75],
+            [0.25, 0.75, 0.75],
+        ],
+    ),
+    20: (
+        "fcc",
+        5.5884e-10,
+        [[0, 0, 0], [0.5, 0.5, 0], [0.5, 0, 0.5], [0, 0.5, 0.5]],
+    ),
+    26: (
+        "bcc",
+        2.8665e-10,
+        [[0, 0, 0], [0.5, 0.5, 0.5]],
+    ),
+    29: (
+        "fcc",
+        3.6149e-10,
+        [[0, 0, 0], [0.5, 0.5, 0], [0.5, 0, 0.5], [0, 0.5, 0.5]],
+    ),
+}
+
+DEFAULT_CRYSTAL_TYPE: str = "fcc"  # Fallback crystal type for unlisted metallic elements

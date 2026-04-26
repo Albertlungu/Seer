@@ -12,7 +12,7 @@ import threading
 
 import numpy as np
 
-from src.dynamics.constants import ANGSTROM_TO_METRE, EV_TO_JOULE
+from src.utils.constants import ANGSTROM_TO_METRE, EV_TO_JOULE
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,7 @@ import time
 import numpy as np
 
 from src.dynamics.sim_thread import SimulationThread
-from src.dynamics.constants import MD_TIMESTEP
+from src.utils.constants import MD_TIMESTEP
 from src.render_molecules.arrange_molecules import build_templates_from_object
 from src.render_molecules.arrangement.geometry import compute_bounding_sphere_radius
 from src.render_molecules.arrangement.placement import PlacementConfig, place_molecules

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from src.dynamics.constants import CRYSTAL_STRUCTURES, DEFAULT_CRYSTAL_TYPE
+from src.utils.constants import CRYSTAL_STRUCTURES, DEFAULT_CRYSTAL_TYPE
 from src.utils.constants import ELEMENT_RADII
 
 logger = logging.getLogger(__name__)
