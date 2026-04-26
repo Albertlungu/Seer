@@ -53,8 +53,15 @@ jobs:
             --icon-size 160 \
             --icon "Seer.app" 274 422 \
             --app-drop-link 823 422 \
-            "${{ matrix.artifact_name }}" \
+            "temp.dmg" \
             dmg-stage
+          hdiutil convert temp.dmg -format UDRW -o writable.dmg
+          hdiutil attach writable.dmg -mountpoint /Volumes/SeerInstall
+          chflags hidden /Volumes/SeerInstall/.background || true
+          chflags hidden /Volumes/SeerInstall/.VolumeIcon.icns || true
+          hdiutil detach /Volumes/SeerInstall
+          hdiutil convert writable.dmg -format UDZO -o "${{ matrix.artifact_name }}"
+          rm temp.dmg writable.dmg
 
       # ── Windows: zip dist/Seer/ ─────────────────────────────────────────
       - name: Package (Windows)
