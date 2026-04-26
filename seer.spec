@@ -12,21 +12,29 @@ Produces:
 
 import os
 import panda3d
+from PyInstaller.utils.hooks import collect_dynamic_libs
 
-_pd3_models = os.path.join(os.path.dirname(panda3d.__file__), "models")
+_pd3_dir = os.path.dirname(panda3d.__file__)
+_pd3_models = os.path.join(_pd3_dir, "models")
+_pd3_etc = os.path.join(_pd3_dir, "etc")
+
+# Collect all Panda3D runtime plugins (.dylib / .dll / .so)
+_pd3_libs = collect_dynamic_libs("panda3d")
 
 block_cipher = None
 
 a = Analysis(
     ["main.py"],
     pathex=["."],
-    binaries=[],
+    binaries=_pd3_libs,
     datas=[
         # Room geometry and molecular data
         ("data/reconstructions/obj/albert_room.obj", "data/reconstructions/obj"),
         ("data/vision_json/final_aggregated.json",   "data/vision_json"),
         # Panda3D built-in models (sphere, box, etc.)
         (_pd3_models, "panda3d/models"),
+        # Panda3D config (Config.prc sets load-display pandagl)
+        (_pd3_etc,    "panda3d/etc"),
     ],
     hiddenimports=[
         "panda3d.core",
