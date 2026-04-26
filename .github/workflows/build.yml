@@ -43,6 +43,8 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install create-dmg
+          mkdir dmg-stage
+          cp -r dist/Seer.app dmg-stage/Seer.app
           create-dmg \
             --volname "Seer" \
             --volicon "assets/seer-icon.icns" \
@@ -52,7 +54,7 @@ jobs:
             --icon "Seer.app" 274 422 \
             --app-drop-link 823 422 \
             "${{ matrix.artifact_name }}" \
-            "dist/Seer.app"
+            dmg-stage
 
       # ── Windows: zip dist/Seer/ ─────────────────────────────────────────
       - name: Package (Windows)
