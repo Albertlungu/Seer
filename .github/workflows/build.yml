@@ -47,21 +47,13 @@ jobs:
           cp -r dist/Seer.app dmg-stage/Seer.app
           create-dmg \
             --volname "Seer" \
-            --volicon "assets/seer-icon.icns" \
             --background "assets/dmg-background.png" \
             --window-size 1097 844 \
             --icon-size 160 \
             --icon "Seer.app" 274 422 \
             --app-drop-link 823 422 \
-            "temp.dmg" \
+            "${{ matrix.artifact_name }}" \
             dmg-stage
-          hdiutil convert temp.dmg -format UDRW -o writable.dmg
-          hdiutil attach writable.dmg -mountpoint /Volumes/SeerInstall
-          chflags hidden /Volumes/SeerInstall/.background || true
-          chflags hidden /Volumes/SeerInstall/.VolumeIcon.icns || true
-          hdiutil detach /Volumes/SeerInstall
-          hdiutil convert writable.dmg -format UDZO -o "${{ matrix.artifact_name }}"
-          rm temp.dmg writable.dmg
 
       # ── Windows: zip dist/Seer/ ─────────────────────────────────────────
       - name: Package (Windows)
