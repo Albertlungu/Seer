@@ -10,6 +10,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from src.utils.json_io import save_json
+from src.utils.resource_path import resource_path
+
 load_dotenv()
 
 vision_api_key = os.getenv("VISION_API_KEY")
@@ -159,8 +162,24 @@ Required output format (and nothing else):
         Args:
             json_input (str): JSON-formatted input.
         """
-        with open(self.output_file, "w") as f:
-            json.dump(json_input, f)
+        # Try to parse JSON and use centralized helper when possible
+        try:
+            parsed = json.loads(json_input)
+        except (json.JSONDecodeError, TypeError):
+            # Fallback: write raw string to resolved path
+            out_path = resource_path(self.output_file)
+            with open(out_path, "w") as f:
+                f.write(str(json_input))
+            return
+
+        # If parsed successfully and target is in vision_json, use save_json
+        out_name = Path(self.output_file).name
+        if "data/vision_json" in self.output_file:
+            save_json(parsed, out_name)
+        else:
+            out_path = resource_path(self.output_file)
+            with open(out_path, "w") as f:
+                json.dump(parsed, f, indent=2)
 
 
 vision = VisionInstance(
@@ -172,5 +191,6 @@ vision = VisionInstance(
 # vision.save_to_json(vlm_output)
 temp = vision.make_completion("data/env_imgs/albert_room/frame_0015.jpg")
 print(temp)
-with open("data/vision_json/test.txt", "w") as f:
+test_path = resource_path("data/vision_json/test.txt")
+with open(test_path, "w") as f:
     f.write(temp)

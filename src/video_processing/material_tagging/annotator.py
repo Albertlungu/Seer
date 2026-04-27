@@ -20,7 +20,6 @@ import open3d as o3d
 from direct.gui.DirectGui import DirectButton, DirectEntry, DirectFrame, DirectLabel
 from direct.gui.OnscreenText import OnscreenText
 from direct.showbase.ShowBaseGlobal import globalClock
-from src.video_processing.environment import Room
 from numpy.typing import NDArray
 from panda3d.core import (
     BitMask32,
@@ -45,10 +44,14 @@ from panda3d.core import (
     loadPrcFileData,
 )
 
+from src.video_processing.environment import Room
+
 loadPrcFileData("", "load-file-type p3assimp")
 
 OBJ_PATH = "./data/reconstructions/obj/albert_room.obj"
 OUTPUT_PATH = "./data/vision_json/annotations.json"
+
+from src.utils.json_io import save_json
 
 COLOURS: list[tuple[float, float, float]] = [
     (1.0, 0.2, 0.2),
@@ -1169,10 +1172,11 @@ class BoxAnnotator(Room):
         """
         Saves all annotations to OUTPUT_PATH as JSON.
         """
-        os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-        with open(OUTPUT_PATH, "w") as file_obj:
-            json.dump(self.annotations, file_obj, indent=2)
-        print(f"Saved {len(self.annotations)} annotations to {OUTPUT_PATH}")
+        # Use centralized JSON helper to ensure consistent path handling
+        save_json(self.annotations, "annotations.json")
+        print(
+            f"Saved {len(self.annotations)} annotations to data/vision_json/annotations.json"
+        )
 
 
 app = BoxAnnotator()
