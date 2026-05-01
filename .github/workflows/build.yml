@@ -115,8 +115,10 @@ jobs:
           Invoke-WebRequest "https://www.python.org/ftp/python/$pyver/$embed" -OutFile $embed
           Expand-Archive $embed -DestinationPath python-embed
 
-          (Get-Content "python-embed/python312._pth") -replace '#import site','import site' |
-            Set-Content "python-embed/python312._pth"
+          # Enable site packages and add the Seer/ dir (parent of python-embed/) to sys.path
+          # so that `from src.seer_app import SeerApp` resolves correctly.
+          $pth = (Get-Content "python-embed/python312._pth") -replace '#import site','import site'
+          Set-Content "python-embed/python312._pth" ($pth + "..")
 
           Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile get-pip.py
           python-embed/python.exe get-pip.py --no-warn-script-location
@@ -202,21 +204,51 @@ jobs:
 
             ## Installation
 
-            **macOS**
-            1. Open the `.dmg` file
-            2. Drag `Seer.app` into Applications
-            3. Try to open the app. It will most likely fail the first time.
-            4. If it fails, run this in Terminal:
+            Each download below is a self-contained package — it ships with its own Python runtime and all dependencies. No Python installation required.
+
+            ---
+
+            ### macOS
+
+            1. Download `Seer-macOS.dmg` and open it.
+            2. Drag `Seer.app` into your Applications folder.
+            3. Try to open the app. It will most likely be blocked the first time.
+            4. If it is blocked, open Terminal and run:
             ```
             xattr -dr com.apple.quarantine /Applications/Seer.app
             ```
-            5. Go to `System Settings > Privacy & Security`, scroll down, and click `Open Anyway` next to the Seer entry
+            5. Go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to the Seer entry.
 
-            **Windows**
-            Unzip and run `Seer.bat` inside the folder.
+            **To run from the terminal instead:**
+            ```
+            /Applications/Seer.app/Contents/MacOS/Seer
+            ```
 
-            **Linux**
-            Extract the `.tar.gz` and run `./Seer.sh`.
+            ---
+
+            ### Windows
+
+            1. Download `Seer-Windows.zip` and unzip it anywhere (e.g. your Downloads folder).
+            2. Open the `Seer` folder inside.
+            3. Double-click `Seer.bat` to launch the app.
+
+            **To run from the terminal (Command Prompt or PowerShell):**
+            ```
+            cd path\to\Seer
+            .\Seer.bat
+            ```
+
+            ---
+
+            ### Linux
+
+            1. Download `Seer-Linux.tar.gz`.
+            2. Extract and run:
+            ```
+            tar -xzf Seer-Linux.tar.gz
+            cd Seer
+            ./Seer.sh
+            ```
           files: |
             Seer-macOS.dmg/Seer-macOS.dmg
             Seer-Windows.zip/Seer-Windows.zip
