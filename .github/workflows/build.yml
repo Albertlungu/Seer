@@ -197,47 +197,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build venv, create run scripts, and package archive
+      - name: Build venv, and package archive
         run: |
           python3 -m venv .venv
           .venv/bin/pip install --upgrade pip -q
           .venv/bin/pip install -r requirements-prod.txt -q
 
-          cat > run.sh << 'SCRIPT'
-#!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV="$DIR/.venv"
-# Rebuild venv if Python binary is missing or not executable on this platform
-if [ ! -f "$VENV/bin/python" ] || ! "$VENV/bin/python" -c "import sys" 2>/dev/null; then
-    echo "Setting up virtual environment..."
-    python3 -m venv "$VENV"
-    "$VENV/bin/pip" install -r "$DIR/requirements-prod.txt" -q
-fi
-exec "$VENV/bin/python" "$DIR/main.py"
-SCRIPT
-          chmod +x run.sh
-
-          cat > run.ps1 << 'SCRIPT'
-$dir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$venv = Join-Path $dir ".venv"
-$python = Join-Path $venv "Scripts\python.exe"
-$ok = (Test-Path $python) -and ((& $python -c "import sys" 2>$null); $LASTEXITCODE -eq 0)
-if (-not $ok) {
-    Write-Host "Setting up virtual environment..."
-    python -m venv $venv
-    & (Join-Path $venv "Scripts\pip") install -r (Join-Path $dir "requirements-prod.txt") --quiet
-}
-& $python (Join-Path $dir "main.py")
-SCRIPT
-
-          # Copy tracked source files and the venv into a staging dir, then zip
           mkdir -p Seer-Source
           git ls-files | while IFS= read -r f; do
             mkdir -p "Seer-Source/$(dirname "$f")"
             cp "$f" "Seer-Source/$f"
           done
           cp -r .venv Seer-Source/.venv
-          cp run.sh run.ps1 Seer-Source/
+          cp scripts/run.sh Seer-Source/run.sh
+          cp scripts/run.ps1 Seer-Source/run.ps1
+          chmod +x Seer-Source/run.sh
           zip -r Seer-Source.zip Seer-Source/
 
       - name: Upload artifact
