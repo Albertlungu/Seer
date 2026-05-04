@@ -27,4 +27,4 @@ def resource_path(relative: str) -> str:
     else:
         # src/utils/ -> src/ -> project root
         base = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    return os.path.normpath(os.path.join(base, relative))
+    return os.path.normpath(os.path.join(base, relative)).replace("\\", "/")
