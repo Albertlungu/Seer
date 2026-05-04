@@ -199,16 +199,16 @@ jobs:
 
       - name: Build venv, and package archive
         run: |
-          python3 -m venv .venv
-          .venv/bin/pip install --upgrade pip -q
-          .venv/bin/pip install -r requirements-prod.txt -q
+          python -m venv venv-prod
+          venv-prod/bin/pip install --upgrade pip -q
+          venv-prod/bin/pip install -r requirements-prod.txt -q
 
           mkdir -p Seer-Source
           git ls-files | while IFS= read -r f; do
             mkdir -p "Seer-Source/$(dirname "$f")"
             cp "$f" "Seer-Source/$f"
           done
-          cp -r .venv Seer-Source/.venv
+          cp -r venv-prod Seer-Source/venv-prod
           cp scripts/run.sh Seer-Source/run.sh
           cp scripts/run.ps1 Seer-Source/run.ps1
           chmod +x Seer-Source/run.sh
