@@ -109,34 +109,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Python embeddable distribution is self-contained on Windows
-          $pyver = "3.12.9"
-          $embed = "python-$pyver-embed-amd64.zip"
-          Invoke-WebRequest "https://www.python.org/ftp/python/$pyver/$embed" -OutFile $embed
-          Expand-Archive $embed -DestinationPath python-embed
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+          python -m pip install -r requirements-prod.txt
 
-          # Enable site packages and add the Seer/ dir (parent of python-embed/) to sys.path
-          # so that `from src.seer_app import SeerApp` resolves correctly.
-          $pth = (Get-Content "python-embed/python312._pth") -replace '#import site','import site'
-          Set-Content "python-embed/python312._pth" ($pth + "..")
+          pyinstaller --onedir --noconfirm --name Seer --add-data "data;data" --collect-all panda3d --collect-all direct main.py
 
-          Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile get-pip.py
-          python-embed/python.exe get-pip.py --no-warn-script-location
-          python-embed/python.exe -m pip install -r requirements-prod.txt `
-            --no-warn-script-location
-
-          New-Item -ItemType Directory -Path Seer | Out-Null
-          Copy-Item main.py Seer/
-          Copy-Item -Recurse src Seer/src
-          Copy-Item -Recurse data Seer/data
-          Copy-Item -Recurse python-embed Seer/python-embed
-
-          @'
-          @echo off
-          "%~dp0python-embed\python.exe" "%~dp0main.py"
-          '@ | Set-Content Seer/Seer.bat
-
-          Compress-Archive -Path Seer -DestinationPath "${{ matrix.artifact_name }}"
+          Compress-Archive -Path dist\Seer -DestinationPath "${{ matrix.artifact_name }}"
 
       # ── Linux ──────────────────────────────────────────────────────────────
       - name: Build (Linux)
@@ -272,12 +251,12 @@ jobs:
 
             1. Download `Seer-Windows.zip` and unzip it anywhere (e.g. your Downloads folder).
             2. Open the `Seer` folder inside.
-            3. Double-click `Seer.bat` to launch the app.
+            3. Double-click `Seer.exe` to launch the app.
 
             **To run from a terminal (Command Prompt or PowerShell):**
             ```
             cd path\to\Seer
-            .\Seer.bat
+            .\Seer.exe
             ```
 
             If the app does not start, follow the **Running from source** instructions below.
