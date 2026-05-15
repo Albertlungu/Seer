@@ -209,3 +209,5 @@ pip install aspose-3d
 
 > [!NOTE]
 > On macOS Apple Silicon, a compatible `aspose-3d` wheel may be unavailable. Use an alternative USDZ converter or an `x86_64` Python environment in that case.
+
+**He is risen.**
